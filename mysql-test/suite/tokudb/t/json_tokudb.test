@@ -1,0 +1,3059 @@
+source include/have_tokudb.inc;
+source include/have_innodb.inc;
+set default_storage_engine=tokudb;
+
+--echo # Test of the JSON data type.
+--echo # ----------------------------------------------------------------------
+
+SET NAMES utf8;
+
+CREATE TABLE t1 (i INT, j JSON);
+SHOW CREATE TABLE t1;
+INSERT INTO t1 VALUES (0, NULL);
+INSERT INTO t1 VALUES (1, '{"a": 2}');
+INSERT INTO t1 VALUES (2, '[1,2]');
+INSERT INTO t1 VALUES (3, '{"a":"b", "c":"d","ab":"abc", "bc": ["x", "y"]}');
+INSERT INTO t1 VALUES (4, '["here", ["I", "am"], "!!!"]');
+INSERT INTO t1 VALUES (5, '"scalar string"');
+INSERT INTO t1 VALUES (6, 'true');
+INSERT INTO t1 VALUES (7, 'false');
+INSERT INTO t1 VALUES (8, 'null');
+INSERT INTO t1 VALUES (9, '-1');
+INSERT INTO t1 VALUES (10, CAST(CAST(1 AS UNSIGNED) AS JSON));
+INSERT INTO t1 VALUES (11, '32767');
+INSERT INTO t1 VALUES (12, '32768');
+INSERT INTO t1 VALUES (13, '-32768');
+INSERT INTO t1 VALUES (14, '-32769');
+INSERT INTO t1 VALUES (15, '2147483647');
+INSERT INTO t1 VALUES (16, '2147483648');
+INSERT INTO t1 VALUES (17, '-2147483648');
+INSERT INTO t1 VALUES (18, '-2147483649');
+INSERT INTO t1 VALUES (19, '18446744073709551615');
+INSERT INTO t1 VALUES (20, '18446744073709551616');
+INSERT INTO t1 VALUES (21, '3.14');
+INSERT INTO t1 VALUES (22, '{}');
+INSERT INTO t1 VALUES (23, '[]');
+INSERT INTO t1 VALUES (24, CAST(CAST('2015-01-15 23:24:25' AS DATETIME) AS JSON));
+INSERT INTO t1 VALUES (25, CAST(CAST('23:24:25' AS TIME) AS JSON));
+INSERT INTO t1 VALUES (26, CAST(CAST('2015-01-15' AS DATE) AS JSON));
+INSERT INTO t1 VALUES (27, CAST(TIMESTAMP'2015-01-15 23:24:25' AS JSON));
+# Test some random data type that will be stored as an opaque value.
+INSERT INTO t1 VALUES (28, CAST(ST_GeomFromText('POINT(1 1)') AS JSON));
+# auto-convert to utf8mb4
+INSERT INTO t1 VALUES (29, CAST('[]' AS CHAR CHARACTER SET 'ascii'));
+
+# Maximum allowed key length is 64k-1
+INSERT INTO t1 VALUES (100, CONCAT('{"', REPEAT('a', 64 * 1024 - 1), '":123}'));
+--error ER_JSON_KEY_TOO_BIG
+INSERT INTO t1 VALUES (101, CONCAT('{"', REPEAT('a', 64 * 1024), '":123}'));
+--error ER_JSON_KEY_TOO_BIG
+INSERT INTO t1 VALUES (102, CAST(CONCAT('{"', REPEAT('a', 64 * 1024), '":123}') AS JSON));
+
+SELECT i, LENGTH(j), j FROM t1 ORDER BY i;
+CREATE TABLE auxtbl(ts TIMESTAMP);
+INSERT INTO auxtbl VALUES ('2015-02-24 18:52:00');
+
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES ('');
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES ('[');
+--error ER_INVALID_JSON_CHARSET
+INSERT INTO t1(j) VALUES (x'cafebabe');
+--error ER_INVALID_JSON_CHARSET
+INSERT INTO t1(j) VALUES (ST_GeomFromText('POINT(1 1)'));
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (-1);
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (CAST(1 AS UNSIGNED));
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (3.14);
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (3.14E30);
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (PI());
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) select ts from auxtbl;
+DROP TABLE auxtbl;
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (CAST('15:52:00' as TIME));
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (CAST('2015-02-24' as DATE));
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t1(j) VALUES (TIMESTAMP '2015-02-24 15:52:00');
+
+# A JSON column cannot be used as a key.
+--error ER_JSON_USED_AS_KEY
+CREATE INDEX t1_idx_j ON t1(j);
+--error ER_JSON_USED_AS_KEY
+CREATE INDEX t1_idx_i_j ON t1(i, j);
+--error ER_JSON_USED_AS_KEY
+CREATE INDEX t1_idx_j_i ON t1(j, i);
+CREATE INDEX t1_idx_i ON t1(i);
+DROP INDEX t1_idx_i ON t1;
+
+CREATE TABLE t2(i INT, j JSON);
+INSERT INTO t2 SELECT i, j FROM t1;
+SELECT i, LENGTH(j) FROM t2 ORDER BY i;
+DROP TABLE t2;
+
+# JSON is a non-reserved keyword, so it should be possible to use it
+# as an identifier.
+CREATE TABLE json(json int);
+INSERT INTO json(json) VALUES (1);
+SELECT json FROM json;
+DROP TABLE json;
+
+--echo #
+--echo # Test of JSON comparator.
+--echo #
+
+SELECT i,
+       (j = '"scalar string"') AS c1,
+       (j = 'scalar string') AS c2,
+       (j = CAST('"scalar string"' AS JSON)) AS c3,
+       (j = CAST(CAST(j AS CHAR CHARACTER SET 'utf8mb4') AS JSON)) AS c4,
+       (j = CAST(NULL AS JSON)) AS c5,
+       (j = NULL) AS c6,
+       (j <=> NULL) AS c7,
+       (j <=> CAST(NULL AS JSON)) AS c8,
+       (j IN (-1, 2, 32768, 3.14)) AS c9,
+       (j IN (CAST('[1, 2]' AS JSON), CAST('{}' AS JSON), CAST(3.14 AS JSON)))
+         AS c10,
+       (j = (SELECT j FROM t1 WHERE j = CAST('null' AS JSON))) AS c11,
+       (j = (SELECT j FROM t1 WHERE j IS NULL)) AS c12,
+       (j = (SELECT j FROM t1 WHERE 1<>1)) AS c13,
+       (j = DATE'2015-01-15') AS c14,
+       (j = TIME'23:24:25') AS c15,
+       (j = TIMESTAMP'2015-01-15 23:24:25') AS c16,
+       (j = CURRENT_TIMESTAMP) AS c17,
+       (j = ST_GeomFromText('POINT(1 1)')) AS c18,
+       (JSN_EXTRACT(j, '$.a') = 2) AS c19
+FROM t1
+ORDER BY i;
+
+SELECT i FROM t1
+  WHERE j = CAST(CAST(j AS CHAR CHARACTER SET 'utf8') AS JSON)
+  ORDER BY i;
+SELECT CAST(NULL AS UNSIGNED) = CAST(NULL AS JSON);
+SELECT CAST(NULL AS JSON) = CAST(NULL AS JSON);
+SELECT CAST(NULL AS JSON) = NULL;
+SELECT CAST(1 AS JSON) = NULL;
+SELECT CAST('true' AS JSON) = 1;
+SELECT CAST('true' AS JSON) = true;
+
+SELECT a.i, b.i, a.j < b.j, a.j = b.j, a.j > b.j, a.j <> b.j, a.j <=> b.j
+FROM t1 a, t1 b
+ORDER BY a.i, b.i;
+
+--echo # Verify that the index on the int column is not used when
+--echo # comparing the int column to a JSON column. The two columns
+--echo # should be compared using the JSON comparator.
+CREATE TABLE t2(i int, j json);
+CREATE INDEX t2_i ON t2(i);
+INSERT INTO t2 values (1, CAST(1 AS JSON));
+INSERT INTO t2 values (1, CAST('"1"' AS JSON));
+ANALYZE TABLE t2;
+let $query=SELECT * FROM t2 where i = j;
+eval EXPLAIN $query;
+eval $query;
+DROP TABLE t2;
+
+# Create a table full of JSON numeric scalars to verify that the JSON
+# comparator returns the expected result when comparing all
+# combinations of those values.
+#
+# The values should be inserted in ascending order. The table has a
+# rank column that tells how the comparator is expected to order the
+# JSON values. If two rows have the same rank, the comparator is
+# expected to say that the JSON values on the two rows are equal. If a
+# row has a lower rank than another, the JSON value in that row is
+# expected to be smaller than the JSON value in the other row.
+CREATE TABLE numbers(id INT NOT NULL AUTO_INCREMENT,
+                     rank INT,
+                     j JSON,
+                     PRIMARY KEY(id));
+INSERT INTO numbers(rank, j) VALUES
+(1, '-1e100'),
+(2, '-1e65'),
+# smallest DECIMAL (negative with 65 digits)
+(3, CAST(-99999999999999999999999999999999999999999999999999999999999999999 AS JSON)),
+(4, CAST(-9223372036854776001 AS JSON)),
+(5, CAST(-9223372036854776000 AS JSON)),
+# closest DOUBLE approximation of the smallest SIGNED BIGINT
+(5 /* same rank as previous */, '-9.223372036854776e18'),
+(6, CAST(-9223372036854775999 AS JSON)),
+(7, CAST(-9223372036854775809 AS JSON)),   # smallest SIGNED BIGINT - 1
+(8, CAST(-9223372036854775808 AS JSON)),   # smallest SIGNED BIGINT
+(9, CAST(-9223372036854775807 AS JSON)),   # smallest SIGNED BIGINT + 1
+(10, '-1e-50'),                  # close to zero, fits in a DECIMAL
+(11, '-1.2345678901234e-71'),    # has to be truncated to fit in a DECIMAL
+(12, CAST(-0.000000000000000000000000000000000000000000000000000000000000000000000012 AS JSON)),
+(12 /* same rank as previous */, '-1.2e-71'),
+(13, '-1.0345678901234e-71'),    # has to be truncated to fit in a DECIMAL
+(14, '-1e-100'),                 # too close to zero to fit in a DECIMAL
+(15, '0'),
+(16, '1e-100'),                  # too close to zero to fit in a DECIMAL
+(17, '1.0345678901234e-71'),     # has to be truncated to fit in a DECIMAL
+(18, CAST(0.000000000000000000000000000000000000000000000000000000000000000000000012 AS JSON)),
+(18 /* same rank as previous */, '1.2e-71'),
+(19, '1.2345678901234e-71'),     # has to be truncated to fit in a DECIMAL
+(20, '1e-50'),                   # close to zero, fits in a DECIMAL
+(21, CAST(9223372036854775806 AS JSON)),    # largest SIGNED BIGINT - 1
+(22, CAST(9223372036854775807 AS JSON)),    # largest SIGNED BIGINT
+(23, CAST(9223372036854775808 AS JSON)),    # largest SIGNED BIGINT + 1
+(24, CAST(9223372036854775999 AS JSON)),
+# closest DOUBLE approximation of the largest SIGNED BIGINT
+(25, '9.223372036854776e18'),
+(25 /* same rank as previous */, CAST(9223372036854776000 AS JSON)),
+(26, CAST(9223372036854776001 AS JSON)),
+(27, CAST(18446744073709551614 AS JSON)),   # largest UNSIGNED BIGINT - 1
+(28, CAST(18446744073709551615 AS JSON)),   # largest UNSIGNED BIGINT
+(29, CAST(18446744073709551616 AS JSON)),   # largest UNSIGNED BIGINT + 1
+# Gets converted to the closest DOUBLE approximation of UNSIGNED BIGINT + 1
+# by the JSON parser
+(30, '18446744073709551616'),
+# biggest DECIMAL (65 digits)
+(31, CAST(99999999999999999999999999999999999999999999999999999999999999999 AS JSON)),
+(32, CAST('1e65' AS JSON)),
+(33, CAST('1e100' AS JSON));
+SELECT *, JSN_TYPE(j) FROM numbers ORDER BY id;
+
+# Now compare every combination of scalars in the table using <, =, >,
+# <> and <=>, and cross-check the results against the ranks. The query
+# returns the rows where the comparison returned an unexpected result.
+# If all is well, the query returns no rows.
+SELECT a.j, b.j, a.j < b.j, a.j = b.j, a.j > b.j, a.j <=> b.j
+FROM numbers a, numbers b
+WHERE ((a.j < b.j) <> (a.rank < b.rank)) OR
+      ((a.j = b.j) <> (a.rank = b.rank)) OR
+      ((a.j > b.j) <> (a.rank > b.rank)) OR
+      ((a.j <=> b.j) <> (a.rank <=> b.rank));
+
+DROP TABLE numbers;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_VALID function.
+--echo # ----------------------------------------------------------------------
+
+--echo
+--echo # Table - Json string column - non-utf8 character set
+create table latin_t (c varchar(20)) CHARACTER SET 'latin1';
+insert into latin_t values ('123');
+# auto-convert to utf-8
+select JSN_VALID(c) from latin_t;
+drop table latin_t;
+
+--echo
+--echo # Table - Json string column - utf-8, NULL
+--echo Note: 'utf8' is a subset of internal 'utf8mb4'
+--echo
+create table utf8_t (c varchar(20)) CHARACTER SET 'utf8';
+insert into utf8_t values (NULL);
+-- echo # Expect NULL:
+select JSN_VALID(c) from utf8_t;
+delete from utf8_t;
+
+--echo
+--echo # Table - Json string column - utf-8, valid
+insert into utf8_t values ('[123]');
+select JSN_VALID(c) from utf8_t;
+delete from utf8_t;
+
+--echo
+--echo # Table - Json string column - utf-8, non-utf8
+insert into utf8_t values ('[123');
+--echo expect 0 (false)
+select JSN_VALID(c) from utf8_t;
+delete from utf8_t;
+
+--echo
+--echo # Table - Try to extract JSON from TIMESTAMP column
+ALTER TABLE utf8_t ADD d TIMESTAMP;
+
+--echo # Should give false; not string or JSON type
+--echo # and we do not convert automatically from TIMESTAMP to JSON
+insert into utf8_t values (NULL, '2014-11-25 18:00');
+select JSN_VALID(d) from utf8_t;
+
+--echo # Explicit cast to a character data type
+--echo # allows MySQL to parse this is a JSON text
+--echo # The string isn't a legal JSON document, tho, so not valid.
+select JSN_VALID(CAST(d as CHAR)) from utf8_t;
+
+--echo # Should give true
+select JSN_VALID(CONCAT( CONCAT('"', CAST(d as CHAR)), '"')) from utf8_t;
+delete from utf8_t;
+drop table utf8_t;
+
+--echo
+--echo # Table - JSON type; should give true by definition
+create table json_t(t json);
+insert into json_t values ('[123]');
+select jsn_VALID(t) from json_t;
+
+--echo
+--echo # String literal - valid JSON
+select JSN_VALID('123');
+select JSN_VALID('"123"');
+select JSN_VALID('true');
+select JSN_VALID('false');
+select JSN_VALID('null');
+select JSN_VALID('{"address": "Trondheim"}');
+
+--echo
+--echo # String literal - not valid JSON
+select JSN_VALID('12 3');
+
+--echo
+--echo # String literal not in UTF-8
+set names 'ascii';
+# auto-convert to utf-8
+select JSN_VALID('123');
+
+set names 'utf8';
+
+--echo
+--echo # Json expression
+select JSN_VALID(cast('[123]' as JSON ));
+
+--echo
+--echo # Json expression NULL
+select JSN_VALID(cast(NULL as JSON ));
+
+--echo
+--echo # Bare NULL
+select JSN_VALID( NULL );
+
+--echo
+--echo # Function result - string
+select JSN_VALID( UPPER('"abc"') );
+
+set names 'latin1';
+--echo
+--echo # Function result - string
+# auto-convert to utf-8
+select JSN_VALID( UPPER('"abc"') );
+
+set names 'utf8';
+
+--echo
+--echo # Function result - date, not valid as JSON without CAST
+select JSN_VALID( CAST('2015-01-15' AS DATE) );
+
+--echo
+--echo # The date string doesn't parse as JSON text, so wrong:
+select JSN_VALID( CAST(CAST('2015-01-15' AS DATE) as CHAR CHARACTER SET 'utf8') );
+--echo # OK, though:
+select JSN_VALID( CAST(CURDATE() as JSON) );
+
+--echo
+--echo # Function result - NULL
+select JSN_VALID( UPPER(NULL) );
+select JSN_VALID( UPPER(CAST(NULL as CHAR)) );
+
+--echo
+--echo # Function result - JSON
+select JSN_VALID( JSN_ARRAY(t, t) ) from json_t;
+
+drop table json_t;
+
+# examples from wl7909 spec
+# returns 1
+SELECT JSN_VALID( '{ "firstName" : "Fred", "lastName" : "Flintstone" }' );
+
+# returns 1
+SELECT JSN_VALID( '3' );
+
+# returns NULL as IS JSON would
+SELECT JSN_VALID( null );
+
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_CONTAINS_PATH function.
+--echo # ----------------------------------------------------------------------
+
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_contains_path();
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_contains_path('{ "a": true }' );
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_contains_path('{ "a": true }', 'all' );
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_contains_path('{ "a": tru }', 'all', '$' );
+--error ER_INVALID_JSON_PATH
+select jsn_contains_path('{ "a": true }', 'all', '$[' );
+--error ER_INVALID_JSON_PATH
+select jsn_contains_path('{ "a": true }', 'all', '$a.***[3]' );
+--error ER_JSON_BAD_CONTAINS_PATH_ARG
+select jsn_contains_path('{ "a": true }', 'foo', '$.a' );
+
+select jsn_contains_path(null, 'all', '$.a' );
+select jsn_contains_path('{ "a": true }', null, '$.a' );
+select jsn_contains_path('{ "a": true }', 'all', null );
+
+# degenerate path
+select jsn_contains_path('{ "a": true }', 'all', '$' );
+
+# positive, one path
+select jsn_contains_path('{ "a": true }', 'all', '$.a' );
+select jsn_contains_path('{ "a": true }', 'one', '$.a' );
+
+# negative, one path
+select jsn_contains_path('{ "a": true }', 'all', '$.b' );
+select jsn_contains_path('{ "a": true }', 'one', '$.b' );
+
+# all
+select jsn_contains_path('{ "a": true }', 'all', '$.a', '$.b' );
+select jsn_contains_path('{ "a": true }', 'all', '$.b', '$.a' );
+select jsn_contains_path('{ "a": true }', 'ALL', '$.a', '$.b' );
+select jsn_contains_path('{ "a": true }', 'aLl', '$.a', '$.b' );
+
+# some
+select jsn_contains_path('{ "a": true }', 'one', '$.a', '$.b' );
+select jsn_contains_path('{ "a": true }', 'one', '$.b', '$.a' );
+select jsn_contains_path('{ "a": true }', 'ONE', '$.a', '$.b' );
+select jsn_contains_path('{ "a": true }', 'oNe', '$.a', '$.b' );
+
+# some wildcards
+select jsn_contains_path('{ "a": true, "b": [ 1, 2, { "c": [ 4, 5, { "d": [ 6, 7, 8, 9, 10 ]} ] } ] }', 'all', '$**[4]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2, { "c": [ 4, 5, { "d": [ 6, 7, 8, 9, 10 ]} ] } ] }', 'all', '$**[4]', '$**[5]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2, { "c": [ 4, 5, { "d": [ 6, 7, 8, 9, 10 ]} ] } ] }', 'all', '$**.c[2]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2, { "c": [ 4, 5, { "d": [ 6, 7, 8, 9, 10 ]} ] } ] }', 'all', '$**.c[3]' );
+
+# 3 paths
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'all', '$**[1]', '$.b[0]', '$.c' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'all', '$.c', '$**[1]', '$.b[0]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'all', '$.b[0]', '$.c', '$**[1]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'one', '$**[1]', '$.b[0]', '$.c' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'one', '$.c', '$**[1]', '$.b[0]' );
+select jsn_contains_path('{ "a": true, "b": [ 1, 2 ] }', 'one', '$.b[0]', '$.c', '$**[1]' );
+
+# examples from the wl7909 spec
+# returns 0 because there is no element at $.a.c
+SELECT JSN_CONTAINS_PATH
+(
+  '{ "a" : 123, "b" : [ 123, 456 ] }',
+  'all',
+  '$.a.c',
+  '$.b[1]'
+);
+
+# returns 1 because there is an element at $.b[1]
+SELECT JSN_CONTAINS_PATH
+(
+  '{ "a" : 123, "b" : [ 123, 456 ] }',
+  'one',
+  '$.a.c',
+  '$.b[1]'
+);
+
+# returns 0 because there is no element at the given path
+SELECT JSN_CONTAINS_PATH
+(
+  '{ "a" : 123, "b" : [ 123, 456 ] }',
+  'all',
+  '$.c'
+);
+
+# returns 1 because there is an element at $.b[1].c.d
+SELECT JSN_CONTAINS_PATH
+(
+  '{ "a" : 123, "b" : [ 123, { "c" : { "d" : true } } ] }',
+  'all',
+  '$.b[1].c.d'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_LENGTH function.
+--echo # ----------------------------------------------------------------------
+
+create table utf8_mj_length (a int, c varchar(20)) CHARACTER SET 'utf8';
+insert into utf8_mj_length values( 1, null );
+insert into utf8_mj_length values( 2, '1' );
+insert into utf8_mj_length values( 3, 'abc' );
+insert into utf8_mj_length values( 4, '"abc"' );
+insert into utf8_mj_length values ( 5, 'true' );
+insert into utf8_mj_length values ( 6, 'false' );
+insert into utf8_mj_length values ( 7, 'null' );
+
+select a, c, jsn_length( c ) from utf8_mj_length where a = 1;
+
+select a, c, jsn_length( c ) from utf8_mj_length where a = 2;
+
+--echo
+--echo # invalid json text
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select a, c, jsn_length( c ) from utf8_mj_length where a = 3;
+
+select a, c, jsn_length( c ) from utf8_mj_length where a = 4;
+select a, c, jsn_length( c ) from utf8_mj_length where a = 5;
+select a, c, jsn_length( c ) from utf8_mj_length where a = 6;
+select a, c, jsn_length( c ) from utf8_mj_length where a = 7;
+
+create table json_mj_length( a int, b json );
+
+insert into json_mj_length values( 1, NULL );
+
+select a, b, jsn_length( b ) from json_mj_length where a = 1;
+
+# jsn_length() with vacuous path expressions
+
+set names 'ascii';
+
+--echo
+--echo # path auto-converted to a utf8 string from ascii
+--echo
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 2;
+
+set names 'utf8';
+
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 1;
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 2;
+
+--echo
+--echo # invalid json text
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 3;
+
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 4;
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 5;
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 6;
+select a, c, jsn_length( c, '$' ) from utf8_mj_length where a = 7;
+
+select a, b, jsn_length( b, '$' ) from json_mj_length where a = 1;
+
+drop table utf8_mj_length;
+drop table json_mj_length;
+
+select jsn_length( null );
+select jsn_length( '1' );
+--echo
+--echo # invalid json text
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_length( 'abc' );
+select jsn_length( '"abc"' );
+select jsn_length( 'true' );
+select jsn_length( 'false' );
+select jsn_length( 'null' );
+
+select jsn_length( '{}' );
+select jsn_length( '{ "a" : 100, "b" : 200 }' );
+select jsn_length( '{ "a" : 100, "b" : [ 300, 400, 500 ] }' );
+select jsn_length( '[]' );
+select jsn_length( '[ null, "foo", true, 1.1 ]' );
+select jsn_length( '[ null, "foo", true, { "a" : "b", "c" : "d" } ]' );
+select jsn_length( '"foo"' );
+select jsn_length( '1.2' );
+
+
+# bad path expressions
+--echo
+--echo # invalid json path
+--error ER_INVALID_JSON_PATH
+select jsn_length( 'true', 'c$' );
+--echo
+--echo # invalid json path
+--error ER_INVALID_JSON_PATH
+select jsn_length( '{ "foo" : [ true, false ] }', '$.foo[bar]' );
+--echo
+--echo # wildcards not allowed in path expressions for this function
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_length( 'true', '$.*' );
+--echo
+--echo # wildcards not allowed in path expressions for this function
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_length( 'true', '$.foo**.bar' );
+
+# jsn_length() with non-vacuous path expressions
+
+# 1
+select jsn_length( '[ 1, [ 2, 3, 4 ], 5 ]', '$[0]' );
+# 3
+select jsn_length( '[ 1, [ 2, 3, 4 ], 5 ]', '$[1]' );
+# 1
+select jsn_length( '[ 1, [ 2, 3, 4 ], 5 ]', '$[2]' );
+# auto-wrapping: 1
+select jsn_length( '[ 1, [ 2, 3, 4 ], 5 ]', '$[2][0]' ); # auto-wrap scalar
+select jsn_length( '[ 1, [ 2, 3, 4 ], {"a": 1} ]', '$[2][0]' ); # ditto object
+
+# non-existent path: null
+select jsn_length( '[ 1, [ 2, 3, 4 ], 5 ]', '$[2][1]' );
+# 3
+select jsn_length( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1]' );
+
+# examples from the wl7909 spec
+# returns 0
+SELECT JSN_LENGTH
+(
+  '{}'
+);
+
+# returns 1
+SELECT JSN_LENGTH
+(
+  '3'
+);
+
+# returns 2
+SELECT JSN_LENGTH
+(
+  '{ "a" : 123, "b" : [ 123, 456, 789 ] }'
+);
+
+# returns 3
+SELECT JSN_LENGTH
+(
+  '{ "a" : 123, "b" : [ 123, 456, 789 ] }',
+  '$.b'
+);
+
+# returns null because the path does not exist
+SELECT JSN_LENGTH
+(
+  '{ "a" : 123, "b" : [ 123, 456, 789 ] }',
+  '$.c'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_DEPTH function.
+--echo # ----------------------------------------------------------------------
+select jsn_depth(null);
+select jsn_depth(cast(null as json));
+select i, jsn_depth(j) from t1;
+select jsn_depth(cast('[]' as json)),
+       jsn_depth(cast('{}' as json)),
+       jsn_depth(cast('null' as json)),
+       jsn_depth(jsn_quote('foo'));
+select jsn_depth(cast('[[2], 3, [[[4]]]]' as json));
+select jsn_depth(cast('{"a": {"a1": [3]}, "b": {"b1": {"c": {"d": [5]}}}}' as json));
+
+# examples from the wl7909 spec
+# returns 1
+SELECT JSN_DEPTH
+(
+  '{}'
+);
+
+# returns 1
+SELECT JSN_DEPTH
+(
+  '[]'
+);
+
+# returns 1
+SELECT JSN_DEPTH( '"abc"' );
+
+# returns 1
+SELECT JSN_DEPTH( CAST( '"abc"' AS JSON ) );
+
+--error ER_INVALID_TYPE_FOR_JSON
+SELECT JSN_DEPTH( 1 );
+
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+SELECT JSN_DEPTH( 'abc' );
+
+# returns 1
+SELECT JSN_DEPTH( CAST( 1 AS JSON ) );
+
+# returns 2
+SELECT JSN_DEPTH
+(
+  '{ "a" : true, "b" : false, "c" : null }'
+);
+
+# returns 2
+SELECT JSN_DEPTH
+(
+  '[ "a", true, "b" , false, "c" , null ]'
+);
+
+# returns 2
+SELECT JSN_DEPTH
+(
+  '{ "a" : true, "b" : {}, "c" : null }'
+);
+
+# returns 2
+SELECT JSN_DEPTH
+(
+  '[ "a", true, "b" , {}, "c" , null ]'
+);
+
+# returns 3
+SELECT JSN_DEPTH
+(
+  '{ "a" : true, "b" : { "e" : false }, "c" : null }'
+);
+
+# returns 3
+SELECT JSN_DEPTH
+(
+  '[ "a", true, "b" , { "e" : false }, "c" , null ]'
+);
+
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+SELECT JSN_DEPTH
+(
+  '[ "a", true, "b" , { "e" : false }, "c" , null'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_REMOVE function.
+--echo # ----------------------------------------------------------------------
+
+# null args
+select jsn_remove( null, '$[1]' );
+select jsn_remove( null, '$[1]' ) is null;
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', null );
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', null ) is null;
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1]', null );
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1]', null ) is null;
+
+# too few args
+
+--echo
+--echo # not enough args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_remove();
+--echo
+--echo # not enough args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]' );
+--echo
+--echo # not enough args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_remove( '$[1]' );
+
+# malformed args
+--echo
+--echo # invalid json text
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ', '$[1]', '$[2]' );
+--echo
+--echo # invalid json path
+--error ER_INVALID_JSON_PATH
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1', '$[2]' );
+--echo
+--echo # invalid json path
+--error ER_INVALID_JSON_PATH
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1]', '$[2' );
+--echo
+--echo # Vacuous path expression
+--error ER_JSON_VACUOUS_PATH
+select jsn_remove( '[ 1, 2, 3 ]', '$' );
+--echo
+--echo # Vacuous path expression
+--error ER_JSON_VACUOUS_PATH
+select jsn_remove( '[ 1, 2, 3 ]', '$', '$[2]' );
+--echo
+--echo # Vacuous path expression
+--error ER_JSON_VACUOUS_PATH
+select jsn_remove( '[ 1, 2, 3 ]', '$[1]', '$' );
+
+# wildcard/ellipsis not allowed in paths
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ 1, 2, 3 ]', '$[*]' );
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ 1, 2, 3 ]', '$**[2]' );
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ 1, 2, 3 ]', '$[2]', '$[*]' );
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ 1, 2, 3 ]', '$[2]', '$**[2]' );
+
+# simple matches
+
+select jsn_remove( '[ 1, 2, 3 ]', '$[0]' );
+select jsn_remove( '[ 1, 2, 3 ]', '$[1]' );
+select jsn_remove( '[ 1, 2, 3 ]', '$[2]' );
+select jsn_remove( '[ 1, 2, 3 ]', '$[3]' );
+select jsn_remove( '[ 1, { "a": true, "b": false, "c": null }, 5 ]', '$[1]' );
+
+# one match nested inside another
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ { "a": { "a": true } } ]', '$**.a' );
+
+# multiple paths
+select jsn_remove( '[ { "a": true }, { "b": false }, { "c": null }, { "a": null } ]', '$[0].a', '$[2].c' );
+
+# ellipsis with matches at different levels
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_remove( '[ { "a": true }, { "b": [ { "c": { "a": true } }  ] }, { "c": null }, { "a": null } ]', '$**.a' );
+
+# nonsense path
+select jsn_remove( '{"id": 123, "name": "systemQA", "array": [1, 2, 3]}', '$[0]' );
+
+# different paths for each row
+CREATE TABLE jsn_remove_t(j JSON, p TEXT);
+INSERT INTO jsn_remove_t(p) VALUES ('$.a'), ('$.b'), ('$.c');
+UPDATE jsn_remove_t SET j = '{"a":1,"b":2,"c":3}';
+SELECT j, p, jsn_remove(j, p) FROM jsn_remove_t ORDER BY p;
+DROP TABLE jsn_remove_t;
+
+# examples from wl7909 spec
+# returns the document {"a": "foo", "b": [true]}
+SELECT JSN_REMOVE
+(
+  '{"a" : "foo", "b" : [true, {"c" : 123}]}',
+  '$.b[ 1 ]'
+);
+
+# returns {"a": "foo", "b": [true, {}]} due to normalization
+SELECT JSN_REMOVE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+  '$.b[ 1 ].c'
+);
+
+# returns {"a": "foo", "b": [true, {}]}
+SELECT JSN_REMOVE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '$.b[ 1 ].c'
+);
+
+# returns the original document because the path doesn't identify an element
+SELECT JSN_REMOVE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123, "d" : 456 } ] }',
+  '$.b[ 1 ].e'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_MERGE function.
+--echo # ----------------------------------------------------------------------
+
+--echo
+--echo # not enough args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_merge();
+--echo
+--echo # not enough args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_merge( '[ 1, 2, 3 ]' );
+
+# null args result in NULL value
+select jsn_merge( null, null );
+select jsn_merge( null, '[ 1, 2, 3 ]' );
+select jsn_merge( '[ 1, 2, 3 ]', null );
+select jsn_merge( null, '[ 1, 2, 3 ]', '[ 4, 5, 6 ]' );
+select jsn_merge( '[ 1, 2, 3 ]', null, '[ 4, 5, 6 ]' );
+select jsn_merge( '[ 1, 2, 3 ]', '[ 4, 5, 6 ]', null );
+
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_merge( '[1, 2]', '[3, 4' );
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_merge( '[1, 2', '[3, 4]' );
+
+# good jsn_merge() expressions
+select jsn_merge( '1', '2' );
+select jsn_merge( '1', '[2, 3]' );
+select jsn_merge( '[1, 2]', '3' );
+select jsn_merge( '1', '{ "a": 2 }' );
+select jsn_merge( '{ "a": 2 }', '1' );
+select jsn_merge( '[1, 2]', '[3, 4]' );
+select jsn_merge( '{ "a": 2 }', '{ "b": 3}' );
+select jsn_merge( '[1, 2]', '{ "a": 2 }' );
+select jsn_merge( '{ "a": 2 }', '[1, 2]' );
+
+select jsn_merge( '{"a": 1, "b": 2 }', '{"b": 3, "d": 4 }' );
+select jsn_merge( '{"a": 1, "b": 2 }', '{"b": [3, 4], "d": 4 }' );
+select jsn_merge( '{"a": 1, "b": [2, 3] }', '{"b": 4, "d": 4 }' );
+select jsn_merge( '{"a": 1, "b": 2 }', '{"b": {"e": 7, "f": 8}, "d": 4 }' );
+select jsn_merge( '{"b": {"e": 7, "f": 8}, "d": 4 }', '{"a": 1, "b": 2 }' );
+select jsn_merge( '{"a": 1, "b": [2, 9] }', '{"b": [10, 11], "d": 4 }' );
+select jsn_merge( '{"a": 1, "b": [2, 9] }', '{"b": {"e": 7, "f": 8}, "d": 4 }' );
+select jsn_merge( '{"b": {"e": 7, "f": 8}, "d": 4 }', '{"a": 1, "b": [2, 9] }' );
+select jsn_merge( '{"b": {"e": 7, "f": 8}, "d": 4 }', '{ "a": 1, "b": {"e": 20, "g": 21 } }' );
+
+select jsn_merge( '1', '2', '3' );
+select jsn_merge( '[1, 2 ]', '3', '[4, 5]' );
+select jsn_merge
+(
+  '{ "a": true, "b": { "c": 3, "d": 4 }, "e": [ 1, 2 ] }',
+  '{ "d": false, "b": { "g": 3, "d": 5 }, "f": [ 1, 2 ] }',
+  '{ "m": true, "b": { "h": 8, "d": 4 }, "e": [ 3, 4 ] }'
+);
+
+CREATE TABLE jsn_merge_t(i INT, j JSON);
+INSERT INTO jsn_merge_t VALUES
+(0, NULL),
+(1, 'true'),
+(2, '5'),
+(3, '[1,2]'),
+(4, '{"a":["x", "y"]}'),
+(5, '{"a":"b","c":"d"}');
+SELECT t1.j, t2.j, jsn_merge(t1.j, t2.j), jsn_merge(t2.j, t1.j)
+FROM jsn_merge_t t1, jsn_merge_t t2 ORDER BY t1.i, t2.i;
+DROP TABLE jsn_merge_t;
+
+# examples from the wl7909 spec
+# returns [{"a": "foo", "b": [true, {"c": 123}]}, 5, 6]
+SELECT JSN_MERGE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '[ 5, 6]'
+);
+
+# returns {"a": "foo", "b": [true, {"c": 123}, false, 34]}
+SELECT JSN_MERGE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '{ "b": [ false, 34 ] }'
+);
+
+# returns {"a": "foo", "b": [true, {"c": 123}, "bar"]}
+SELECT JSN_MERGE
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '{ "b": "bar" }'
+);
+
+# returns {"a": {"b": 1, "c": 1}}
+SELECT JSN_MERGE
+(
+  '{ "a" : { "b" : 1 } }',
+  '{ "a" : { "c" : 1 } }'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_TYPE function.
+--echo # ----------------------------------------------------------------------
+
+# negative test
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_type('abc');
+
+select i, jsn_type(j) from t1;
+select jsn_type('{"a": 2}');
+select jsn_type('[1,2]');
+select jsn_type('"scalar string"');
+select jsn_type('true');
+select jsn_type('false');
+select jsn_type('null');
+select jsn_type('1');
+select jsn_type('-0');
+select jsn_type('-0.0');
+--error ER_INVALID_TYPE_FOR_JSON
+select jsn_type(-1);
+--error ER_INVALID_TYPE_FOR_JSON
+select jsn_type(CAST(1 AS UNSIGNED));
+select jsn_type('32767');
+--error ER_INVALID_TYPE_FOR_JSON
+select jsn_type(PI());
+select jsn_type('3.14');
+
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_type(CAST(CAST('2015-01-15' AS DATE) as CHAR CHARACTER SET 'utf8'));
+
+create table keys1(i int, j json);
+insert into keys1 select * from t1;
+
+DROP TABLE t1;
+
+# example from the wl7909 spec
+
+create table rawOrders( orderID int, doc json );
+insert into rawOrders values ( 1, '100' ), ( 2, '{ "id": 2, "quantity": 200 }' );
+
+create table orders( orderID int, quantity int unsigned );
+
+INSERT INTO orders( orderID, quantity )
+  SELECT
+   r.orderID,
+   CASE( JSN_TYPE( r.doc ) )
+     WHEN "INTEGER" THEN CAST( r.doc AS UNSIGNED INT )
+     WHEN "OBJECT" THEN CAST( JSN_EXTRACT( r.doc, '$.quantity' ) AS UNSIGNED INT )
+     ELSE NULL
+   END
+  FROM rawOrders r;
+
+select * from rawOrders;
+select * from orders;
+
+drop table rawOrders;
+drop table orders;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of CAST(<column> AS JSON)
+--echo # ----------------------------------------------------------------------
+create table t1(dati datetime, da date,
+                tim time, ts timestamp,
+                y year,
+                --
+                ti tinyint,   tiu tinyint unsigned,
+                si smallint,  siu smallint unsigned,
+                mi mediumint, miu mediumint unsigned,
+                i  int,       iu  int unsigned,
+                bi bigint,    biu bigint unsigned,
+                boo boolean,
+                --
+                dc decimal(5,2),
+                n numeric(5,2),
+                --
+                f float, d double,
+                bitt bit(10),
+                blb blob,
+                bin binary(10),
+                en enum('a','b','c'),
+                se set('a','b','c'),
+                --
+                ge geometry,
+                po point,
+                ls linestring,
+                py polygon,
+                js json
+                ) engine=innodb;
+
+
+insert into t1 values('2014-11-25 18:00', '2014-11-25',
+                      '18:00:59', '2014-11-25 18:00',
+                      '1999',
+                      --
+                      127, 255,
+                      32767, 65535,
+                      8388607, 16777215, -- 3 bytes
+                      2147483647, 4294967295, -- 4 bytes
+                      9223372036854775807, 18446744073709551615,
+                      true,
+                                            --
+                      3.14,
+                      3.14,
+                      --
+                      3.14, 3.14,
+                      b'10101',
+                      '10101abcde',
+                      '10101abcde',
+                      'b',
+                      'a,c',
+                      --
+                      ST_GeomFromText('POINT(1 1)'),
+                      ST_GeomFromText('POINT(1 1)'),
+                      ST_GeomFromText('LINESTRING(0 0,1 1,2 2)'),
+                      ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),
+                                            (5 5,7 5,7 7,5 7, 5 5))'),
+                      '[123]'
+                      );
+
+select jsn_type(cast(dati as json)) from t1;
+select jsn_type(cast(da as json)) from t1;
+select jsn_type(cast(tim as json)) from t1;
+select jsn_type(cast(ts as json)) from t1;
+
+select jsn_type(cast(y as json)) from t1;
+select jsn_type(cast(ti as json)) from t1;
+select jsn_type(cast(tiu as json)) from t1;
+select jsn_type(cast(si as json)) from t1;
+select jsn_type(cast(siu as json)) from t1;
+select jsn_type(cast(mi as json)) from t1;
+select jsn_type(cast(miu as json)) from t1;
+select jsn_type(cast(i as json)) from t1;
+select jsn_type(cast(iu as json)) from t1;
+select jsn_type(cast(bi as json)) from t1;
+select jsn_type(cast(biu as json)) from t1;
+select jsn_type(cast(boo as json)) from t1; # INTEGER (not enough info)
+
+select jsn_type(cast(dc as json)) from t1;
+# select jsn_type(cast(n as json)) from t1;
+
+select jsn_type(cast(f as json)) from t1;
+select jsn_type(cast(d as json)) from t1;
+
+select jsn_type(cast(bitt as json)) from t1;
+select jsn_type(cast(blb as json)) from t1;
+select jsn_type(cast(bin as json)) from t1;
+
+select jsn_type(cast(en as json)) from t1;
+select jsn_type(cast(se as json)) from t1;
+
+select jsn_type(cast(ge as json)) from t1;
+select jsn_type(cast(po as json)) from t1;
+select jsn_type(cast(ls as json)) from t1;
+select jsn_type(cast(py as json)) from t1;
+
+select jsn_type(cast(js as json)) from t1;
+
+#
+# same, but now show the printable value:
+#
+select cast(dati as json) from t1;
+select cast(da as json) from t1;
+select cast(tim as json) from t1;
+select cast(ts as json) from t1;
+
+select cast(y as json) from t1;
+select cast(ti as json) from t1;
+select cast(tiu as json) from t1;
+select cast(si as json) from t1;
+select cast(siu as json) from t1;
+select cast(mi as json) from t1;
+select cast(miu as json) from t1;
+select cast(i as json) from t1;
+select cast(iu as json) from t1;
+select cast(bi as json) from t1;
+select cast(biu as json) from t1;
+select cast(boo as json) from t1; # INTEGER (not enough info)
+
+select cast(dc as json) from t1;
+# select cast(n as json) from t1;
+
+select cast(f as json) from t1;
+select cast(d as json) from t1;
+
+select cast(bitt as json) from t1;
+select cast(blb as json) from t1;
+select cast(bin as json) from t1;
+
+select cast(en as json) from t1;
+select cast(se as json) from t1;
+
+select cast(ge as json) from t1;
+select cast(po as json) from t1;
+select cast(ls as json) from t1;
+select cast(py as json) from t1;
+
+select cast(js as json) from t1;
+
+drop table t1;
+
+create table t1 ( c1 varchar(200) character set 'latin1',
+                  c2 varchar(200) character set 'utf8' );
+insert into t1 values ('[1,2]',  # legal json, but not utf-8
+                       '[1,2 '); # illegal json, but utf-8
+
+# convert latin1 to UTF-8
+select cast(c1 as json) from t1;
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select cast(c2 as json) from t1;
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select cast(c2 as json) is null from t1;
+
+drop table t1;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of CAST(literal AS JSON)
+--echo # ----------------------------------------------------------------------
+select jsn_type(cast(cast('2014-11-25 18:00' as datetime) as json));
+select jsn_type(cast(cast('2014-11-25' as date) as json));
+select jsn_type(cast(cast('18:00:59' as time) as json));
+# select jsn_type(cast(cast('2014-11-25 18:00' as timestamp) as json)); -- cast target type not supported
+
+# select jsn_type(cast(cast('1999' as year) as json)); -- cast target type not supported
+select jsn_type(cast(127 as json));
+select jsn_type(cast(255 as json));
+select jsn_type(cast(32767 as json));
+select jsn_type(cast(65535 as json));
+select jsn_type(cast(8388607 as json));
+select jsn_type(cast(16777215 as json));
+select jsn_type(cast(2147483647 as json));
+select jsn_type(cast(4294967295 as json));
+select jsn_type(cast(9223372036854775807 as json));
+select jsn_type(cast(18446744073709551615 as json));
+select jsn_type(cast(true as json));
+select jsn_type(cast(b'10101' as json));
+
+select jsn_type(cast(cast(3.14 as decimal(5,2)) as json));
+select jsn_type(cast(3.14 as json));
+select jsn_type(cast(3.14E30 as json));
+# select jsn_type(cast(cast(3.14 as numeral(5,2)) as json)); -- cast target type not supported
+
+# select jsn_type(cast(cast(3.14 as double) as json)); -- cast target type not supported
+# select jsn_type(cast(cast(3.14 as float) as json)); -- cast target type not supported
+
+# select jsn_type(cast(cast(b'10101' as bit(10)) as json));  -- cast target type not supported
+# select jsn_type(cast(cast('10101abcde' as blob) as json)); -- cast target type not supported
+select jsn_type(cast(cast('10101abcde' as binary) as json));
+
+# select jsn_type(cast(cast('a' as enum('a','b','c')) as json)); -- cast target type not supported
+# select jsn_type(cast(cast('a,c' as set('a','b','c')) as json)); -- cast target type not supported
+
+select jsn_type(cast(ST_GeomFromText('POINT(1 1)') as json));
+select jsn_type(cast(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)') as json));
+select jsn_type(cast(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),
+                                     (5 5,7 5,7 7,5 7, 5 5))') as json));
+select jsn_type(cast(null as json));
+select jsn_type(cast(null as json)) is null; # check that it is an SQL NULL
+select jsn_type(null) is null;               # is an SQL NULL
+
+#
+# same, but now show the printable value:
+#
+select cast(cast('2014-11-25 18:00' as datetime) as json);
+select cast(cast('2014-11-25' as date) as json);
+select cast(cast('18:00:59' as time) as json);
+# select cast(cast('2014-11-25 18:00' as timestamp) as json); -- cast target type not supported
+
+# select cast(cast('1999' as year) as json); -- cast target type not supported
+select cast(127 as json);
+select cast(255 as json);
+select cast(32767 as json);
+select cast(65535 as json);
+select cast(8388607 as json);
+select cast(16777215 as json);
+select cast(2147483647 as json);
+select cast(4294967295 as json);
+select cast(9223372036854775807 as json);
+select cast(18446744073709551615 as json);
+select cast(true as json);
+select cast(b'10101' as json);
+
+select cast(cast(3.14 as decimal(5,2)) as json);
+select cast(3.14 as json);
+select cast(3.14e0 as json);
+# select cast(cast(3.14 as numeral(5,2)) as json); -- cast target type not supported
+
+# select cast(cast(3.14 as double) as json); -- cast target type not supported
+# select cast(cast(3.14 as float) as json); -- cast target type not supported
+
+# select cast(cast(b'10101' as bit(10) as json);  -- cast target type not supported
+# select cast(cast('10101abcde' as blob) as json); -- cast target type not supported
+select cast(cast('10101abcde' as binary) as json);
+
+# select cast(cast('a' as enum('a','b','c') as json); -- cast target type not supported
+# select cast(cast('a,c' as set('a','b','c') as json); -- cast target type not supported
+
+select cast(ST_GeomFromText('POINT(1 1)') as json);
+select cast(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)') as json);
+select cast(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),
+                                     (5 5,7 5,7 7,5 7, 5 5))') as json);
+select cast(null as json);
+select cast(null as json) is null; # check that it is an SQL NULL
+
+# Two distinct but related bugs detected by Knut 2015-02-05 caused NULL for y here:
+create table t2(x int);
+insert into t2 values (1), (2);
+select x, cast(y as json) from (select x, cast(x as json) as y from t2) s;
+select x, cast(y as json) from (select x, cast(cast(x as json) as char charset utf8) as y from t2) s;
+
+# Test that CAST string argument isn't treated as ANY_JSON_ATOM
+# in that a MySQL string needs to be parsed to JSON here; it is not
+# auto-converted to a JSON string as in ANY_JSON_ATOM contexts.
+select cast('"abc"' as json);
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select cast('abc' as json);
+
+
+drop table t2;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of CAST(<select> AS JSON)
+--echo # ----------------------------------------------------------------------
+# positive test cases
+select cast((select 1) as json);
+
+create table t(i int, j json, c char(10) character set 'utf8');
+insert into t values (5, '6', '{}');
+select cast((select i from t) as json);
+select cast((select j from t) as json);
+select cast((select c from t) as json);
+select cast((select cast(i as json) from t) as json);
+select cast((select cast(j as json) from t) as json);
+select cast((select cast(c as json) from t) as json);
+
+# negative test cases
+--error ER_OPERAND_COLUMNS
+select cast((select i,i from t) as json);
+--error ER_OPERAND_COLUMNS
+select cast((select * from t) as json);
+
+insert into t values (7, '8', '[]');
+--error ER_SUBQUERY_NO_1_ROW
+select cast((select i from t) as json);
+
+# Test what happens if the subquery returns NULL. The casts should
+# return SQL NULL.
+delete from t;
+insert into t values (null, null, null);
+select cast((select i from t) as json);
+select cast((select j from t) as json);
+select cast((select cast(i as json) from t) as json);
+select cast((select cast(j as json) from t) as json);
+select cast((select cast(c as json) from t) as json);
+
+drop table t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of generated columns that call JSON functions
+--echo # ----------------------------------------------------------------------
+CREATE TABLE t(id INT, j JSON,
+               gc INT GENERATED ALWAYS AS (JSN_EXTRACT(j, '$[0]'))) engine=innodb;
+INSERT INTO t(id, j) VALUES (0, '"5"'), (1, '[]'), (2, '[1,2]'), (3, '5');
+--error ER_TRUNCATED_WRONG_VALUE
+INSERT INTO t(j) VALUES ('{}');
+--error ER_TRUNCATED_WRONG_VALUE
+INSERT INTO t(j) VALUES ('{"a":1}');
+--error ER_TRUNCATED_WRONG_VALUE
+INSERT INTO t(j) VALUES ('"abc"');
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t(j) VALUES ('');
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t(j) VALUES ('[');
+SELECT * FROM t ORDER BY id;
+UPDATE t SET j = '[123]';
+SELECT * FROM t ORDER BY id;
+--error ER_INVALID_JSON_TEXT
+UPDATE t SET j = '[';
+DROP TABLE t;
+
+CREATE TABLE t(id INT, j JSON,
+               gc JSON GENERATED ALWAYS AS (JSN_ARRAY(j))) engine=innodb;
+INSERT INTO t(id, j)
+  VALUES (1, '1'), (2, '[true, false]'), (3, '{"a":1,"b":2}');
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t(j) VALUES ('');
+--error ER_INVALID_JSON_TEXT
+INSERT INTO t(j) VALUES ('[');
+SELECT * FROM t ORDER BY id;
+UPDATE t SET j = '"abc"';
+SELECT * FROM t ORDER BY id;
+--error ER_INVALID_JSON_TEXT
+UPDATE t SET j = '[';
+DROP TABLE t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_KEYS function.
+--echo # ----------------------------------------------------------------------
+
+select i, jsn_keys(j) from keys1;
+
+# should all give NULL:
+select jsn_keys(NULL);
+select jsn_keys(NULL, '$.b');
+select jsn_keys(NULL, NULL);
+select jsn_keys('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.a');
+select jsn_keys('{"a": 1, "b": {"e": "foo", "b": 3}}', NULL);
+
+# non NULL results
+select jsn_keys('{"a": 1, "b": {"e": "foo", "b": 3}}');
+select jsn_keys('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.b');
+
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_keys('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.*.b');
+
+delete from keys1;
+insert into keys1 values (0, NULL),
+                        (1, '{"a": 1, "b": {"e": "foo", "b": 3}}');
+select i, jsn_keys(j), jsn_keys(j, '$.b') from keys1;
+
+# Examples from the specification
+--echo # returns [ "a", "b" ]
+SELECT JSN_KEYS('{ "a" : "foo", "b" : [ true, { "c" : "123" } ] }');
+
+--echo # returns []
+SELECT JSN_KEYS('{ "a" : "foo", "b" : [ true, { "c" : {} } ] }',
+                '$.b[1].c');
+
+--echo # returns NULL
+SELECT JSN_KEYS('{ "a" : "foo", "b" : [ true, { "c" : {} } ] }',
+                '$.a.b[2]');
+
+--error ER_INVALID_JSON_PATH
+SELECT JSN_KEYS('{"a":1}', '1010');
+--error ER_INVALID_JSON_PATH
+SELECT JSN_KEYS('{"a":1}', '1010') IS NULL;
+
+# examples from the wl7909 spec
+# returns [ "a", "b" ]
+SELECT JSN_KEYS
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : "123" } ] }'
+);
+
+# returns []
+SELECT JSN_KEYS
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : {} } ] }',
+  '$.b[1].c'
+);
+
+# returns NULL
+SELECT JSN_KEYS
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : {} } ] }',
+  '$.a.b[2]'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # CAST(<json> AS CHAR). See also 'json_conversions.test' for other
+--echo # conversion tests.
+--echo # ----------------------------------------------------------------------
+select cast(jsn_keys('{"a": 1}') as char);
+select cast(cast(1 as json) as char);
+select cast(jsn_keys(NULL) as char);
+select cast(j as char) from keys1;
+
+create table t(i int);
+select cast(jsn_extract(j, '$.b.b') as char) from keys1;
+insert into t select cast(jsn_extract(j, '$.b.b') as char) from keys1;
+select * from t;
+drop table t;
+drop table keys1;
+
+--echo # ----------------------------------------------------------------------
+--echo # Path matching with double-quotes
+--echo # ----------------------------------------------------------------------
+
+# matches
+select jsn_extract( '{ "one potato" : 1 }', '$."one potato"' );
+# matches
+select jsn_extract( '{ "a.b" : 1 }', '$."a.b"' );
+
+# doesn't match
+select jsn_extract( '{ "\\"a\\"": 1}', '$."a"' );
+# matches
+select jsn_extract( '{ "\\"a\\"": 1}', '$."\\"a\\""' );
+# matches
+select jsn_extract( '{ "a": 1}', '$."a"' );
+# matches
+select jsn_extract( '{ "a": 1}', '$.a' );
+
+# examples from functional spec section on Path Syntax
+
+# [3, 2]
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.a[0]' );
+# 2
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.a[0][1]' );
+# [ { "c": "d" }, 1 ]
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.a[1]' );
+# { "c": "d" }
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.a[1][0]' );
+# "d"
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.a[1][0].c' );
+# 7
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$."one potato"' );
+# 6
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$.b.c' );
+# 8
+select jsn_extract( '{ "a": [ [ 3, 2 ], [ { "c" : "d" }, 1 ] ], "b": { "c" : 6 }, "one potato": 7, "b.c" : 8 }', '$."b.c"' );
+
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_EXTRACT function.
+--echo # ----------------------------------------------------------------------
+
+# errors
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_extract(NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_extract('$.b');
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_extract('{"a": 1, "b": {"e": "foo", "b": 3}}');
+
+# Confused argument order
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_extract('$.a', '{"a": 1, "b": {"e": "foo", "b": 3}}');
+
+# NULLs
+select jsn_extract(NULL, '$.b');
+select jsn_extract(NULL, NULL);
+
+# non-NULLs
+select jsn_extract('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.a');
+select jsn_extract('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.*');
+select jsn_extract('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.a', '$.b.e');
+select jsn_extract('{"a": 1, "b": [1,2,3]}', '$.b[2]');
+# one path is NULL
+select jsn_extract('{"a": 1, "b": {"e": "foo", "b": 3}}', '$.a', NULL);
+
+# Examples from the specification
+--echo # returns a JSON value containing just the string "123"
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : "123" } ] }',
+                   '$.b[ 1 ].c');
+
+--echo # returns a JSON value containing just the number 123
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+                   '$.b[ 1 ].c');
+
+--echo # raises an error because the document is not valid
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+SELECT JSN_EXTRACT('{ "a" : [ }',
+                   '$.b[ 1 ].c');
+
+--echo # raises an error because the path is invalid
+--error ER_INVALID_JSON_PATH
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+                   '$.b[ 1 ].');
+
+--echo # returns a JSON value containing the number 123 (because of 
+--echo # auto-wrapping the scalar)
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+                   '$.b[ 1 ].c[ 0 ]');
+--echo # returns a JSON value containing the object because of auto-wrapping
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : {"not array": 4} } ] }',
+                   '$.b[ 1 ].c[ 0 ]');
+
+--echo # returns null because the path, although valid, does not identify a value
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+                   '$.b[ 1 ].c[ 1 ]');
+
+--echo # returns a JSON value containing the number 123 (due to normalization)
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+                   '$.b[ 1 ].c');
+
+--echo # returns a JSON array [ "foo", true ]
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+                   '$.a', '$.b[0]');
+
+--echo # returns a JSON array [ true ]
+SELECT JSN_EXTRACT('{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+                   '$.d', '$.b[0]');
+
+# some examples verifying ellipsis behavior
+
+# should have same result
+select jsn_extract( '[1]', '$[0][0]' );
+select jsn_extract( '[1]', '$**[0]' );
+
+# should have same result
+select jsn_extract( '{ "a": 1 }', '$.a[0]' );
+select jsn_extract( '{ "a": 1 }', '$**[0]' );
+
+# should have same result
+select jsn_extract( '{ "a": 1 }', '$[0].a' );
+select jsn_extract( '{ "a": 1 }', '$**.a' );
+
+# should have same result
+select jsn_extract( '{ "a": 1 }', '$[0].a[0]' );
+select jsn_extract( '{ "a": 1 }', '$**[0]' );
+
+# should have the same result
+select jsn_extract( '{ "a": 1 }', '$[0].a' );
+select jsn_extract( '{ "a": 1 }', '$**.a' );
+select jsn_extract( '{ "a": 1 }', '$[0][0].a' );
+select jsn_extract( '{ "a": 1 }', '$[0][0][0].a' );
+
+# examples from the wl7909 spec
+# returns a JSON value containing just the string "123"
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : "123" } ] }',
+  '$.b[ 1 ].c'
+);
+
+# returns a JSON value containing just the number 123
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '$.b[ 1 ].c'
+);
+
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+SELECT JSN_EXTRACT
+(
+  '{ "a" : [ }',
+  '$.b[ 1 ].c'
+);
+
+--error ER_INVALID_JSON_PATH
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '$.b[ 1 ].'
+);
+
+# returns a JSON value containing the number 123 (because of auto-wrapping)
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '$.b[ 1 ].c[ 0 ]'
+);
+
+# returns null because the path, although valid, does not identify a value
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123 } ] }',
+  '$.b[ 1 ].c[ 1 ]'
+);
+
+# returns a JSON value containing the number 123 (due to normalization)
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+  '$.b[ 1 ].c'
+);
+
+# returns a JSON array ["foo", true]
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+  '$.a', '$.b[0]'
+);
+
+# returns a the 'true' literal
+SELECT JSN_EXTRACT
+(
+  '{ "a" : "foo", "b" : [ true, { "c" : 123, "c" : 456 } ] }',
+  '$.d', '$.b[0]'
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_APPEND function.
+--echo # ----------------------------------------------------------------------
+
+# NULLs
+select jsn_append(NULL, '$.b', cast(1 as json));
+select jsn_append('[1,2,3]', NULL, cast(1 as json));
+select jsn_append('[1,2,3]', '$', NULL);
+
+# wrong # args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_append(NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_append(NULL, NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_append(NULL, NULL, NULL, NULL);
+
+# positive test cases
+create table t(j json);
+insert into t values ('[ 1, 2, 3, {"a": [4,5,6]}]');
+select jsn_append(j, '$[3].a', cast(7 as json)) from t;
+select jsn_append(j, '$', 7) from t;
+select jsn_append(j, '$', cast(7 as json), '$[3].a', 3.14) from t;
+--echo # second path's append ignored since it doesn't specify an array
+--echo # nor is it an existing scalar,  so no auto-wrapping either
+select jsn_append(j, '$', 7, '$[3].b', cast(8 as json)) from t;
+drop table t;
+
+# auto-wrap
+SELECT JSN_APPEND(cast('1' as json), '$', 3);
+SELECT JSN_APPEND(cast('{"a": 3}' as json), '$', 3);
+
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_append(cast('{"a": {"b": [3]}}' as json), '$**[0]', 6);
+
+# Examples from the specification
+
+--echo # Auto-wrapping, since because the paths identify scalars.
+--echo # should return {"a": "foo", "b": ["bar", 4], "c": ["wibble", "grape"]}
+SELECT JSN_APPEND('{"a": "foo", "b": "bar", "c": "wibble"}',
+                  '$.b', cast(4 as json),
+                  '$.c', cast('"grape"' as json));
+
+--echo # should return {"a": "foo", "b": [1, 2, 3, 4],
+--echo #                "c": ["apple", "pear", "grape"]}
+SELECT JSN_APPEND('{"a" : "foo","b": [1, 2, 3], "c": ["apple", "pear"]}',
+                 '$.b', cast(4 as json),
+                 '$.c', cast('"grape"' as json));
+
+# without CAST: cf. not required for ANY_JSON_ATOM arguments in specification
+SELECT JSN_APPEND('{"a" : "foo","b": [1, 2, 3], "c": ["apple", "pear"]}',
+                 '$.b', 4,
+                 '$.c', 'grape');
+
+# wild cards, multiple pairs
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_append( '[[], [], []]', '$[*]', 3, '$[*]', 4);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_append( '[[], "not array", []]', '$[*]', 3, '$[*]', 4);
+
+# examples from wl7909 spec
+# should return {"a": "foo", "b": ["bar", 4], "c": ["wibble", "grape"]} due to autowrapping
+SELECT JSN_APPEND
+(
+   '{ "a" : "foo", "b" : "bar", "c" : "wibble" }',
+   '$.b', 4,
+   '$.c', "grape"
+);
+
+# should return {"a": "foo", "b": [1, 2, 3, 4], "c": ["apple", "pear", "grape"]}
+SELECT JSN_APPEND
+(
+   '{ "a" : "foo", "b" : [ 1, 2, 3 ], "c" : [ "apple", "pear" ] }',
+   '$.b', 4,
+   '$.c', "grape"
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_INSERT function.
+--echo # ----------------------------------------------------------------------
+
+# NULLs
+select jsn_insert(NULL, '$.b', cast(1 as json));
+select jsn_insert('[1,2,3]', NULL, cast(1 as json));
+select jsn_insert('[1,2,3]', '$[3]', NULL);
+
+# wrong # args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_insert(NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_insert(NULL, NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_insert(NULL, NULL, NULL, NULL);
+
+# positive test cases
+
+select jsn_insert('[1,2,3]', '$[2]', 4);
+select jsn_insert('[1,2,3]', '$[3]', 4);
+select jsn_insert('[1,2,3]', '$[10]', 4);
+
+select jsn_insert('{"c":4}', '$.c', 4);
+select jsn_insert('{"c":4}', '$.a', 4);
+
+select jsn_insert('1', '$', 4);
+select jsn_insert('1', '$[0]', 4);
+select jsn_insert('1', '$[1]', 4);
+select jsn_insert('1', '$[10]', '4', '$[11]', 5);
+
+select jsn_insert('[1,2,3]', '$[2][0]', 4);
+select jsn_insert('[1,2,3]', '$[2][2]', 4);
+
+select jsn_insert('{"a": 3}', '$.a[0]', 4);
+select jsn_insert('{"a": 3}', '$.a[1]', 4, '$.a[2]', '5');
+
+# wild card & auto-wrap (scalars)
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": [1], "b": 2}' as json), '$.*[1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": 1, "b": 2}' as json), '$.*[1]', 6);
+
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": {"b": 3}}' as json),   '$.a.*[1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": {"b": [3]}}' as json), '$.a.*[1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": {"b": 3}}' as json),   '$**[1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('{"a": {"b": [3]}}' as json), '$**[1]', 6);
+
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[1]' as json), '$[*][1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[1]' as json), '$**[1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[1, [2], 3]' as json), '$[*][1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[1, [2], 3]' as json), '$**[1]', 6);
+
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[[1]]' as json), '$[*][1]', 6);
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_insert(cast('[[1]]' as json), '$**[1]', 6);
+
+# auto-wrap object
+select jsn_insert(cast('{"a": 3}' as json), '$[1]', 6);
+              
+
+# Examples from the specification
+
+# returns the original document because the path does exist
+SELECT JSN_INSERT('{ "a" : "foo", "b" : [ 1, 2, 3 ] }', '$.a', true);
+
+# inserts a number, returns '{ "a" : "foo", "b" : [ 1, 2, 3 ], "c" : 123 }
+SELECT JSN_INSERT('{ "a" : "foo", "b" : [ 1, 2, 3 ] }', '$.c', 123);
+
+# inserts a string, returns '{ "a" : "foo", "b" : [ 1, 2, 3 ], "c" : "123" }
+SELECT JSN_INSERT('{ "a" : "foo", "b" : [ 1, 2, 3 ] }', '$.c', '123');
+
+# returns '{ "a" : [ "foo", true ], "b" : [ 1, 2, 3 ] }'
+SELECT JSN_INSERT('{ "a" : "foo", "b" : [ 1, 2, 3 ] }', '$.a[1]', true);
+
+# should return { "a" : "foo", "b": true }
+SELECT JSN_INSERT('{ "a" : "foo"}', '$.b', true, '$.b', false);
+
+# examples from the wl7909 spec
+# returns the original document because the path does exist
+SELECT JSN_INSERT
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.a',
+  true
+);
+
+# inserts a number, returns '{"a": "foo", "b": [1, 2, 3], "c": 123}
+SELECT JSN_INSERT
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.c',
+  123
+);
+
+# inserts a string, returns '{"a": "foo", "b": [1, 2, 3], "c": "123"}
+SELECT JSN_INSERT
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.c',
+  '123'
+);
+
+# returns '{"a": ["foo", true], "b": [1, 2, 3]}'
+SELECT JSN_INSERT
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.a[1]',
+  true
+);
+
+# returns {"a": "foo", "b": true}
+SELECT JSN_INSERT
+(
+   '{ "a" : "foo"}',
+   '$.b', true,
+   '$.b', false
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_SET function.
+--echo # ----------------------------------------------------------------------
+
+# NULLs
+select jsn_set(NULL, '$.b', cast(1 as json));
+select jsn_set('[1,2,3]', NULL, cast(1 as json));
+select jsn_set('[1,2,3]', '$[3]', NULL);
+
+# wrong # args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_set(NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_set(NULL, NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_set(NULL, NULL, NULL, NULL);
+
+# positive test cases
+
+select jsn_set('[1,2,3]', '$[2]', 4);
+select jsn_set('[1,2,3]', '$[3]', 4);
+select jsn_set('[1,2,3]', '$[10]', 4);
+
+select jsn_set('{"c":4}', '$.c', 5);
+select jsn_set('{"c":4}', '$.a', 5);
+
+select jsn_set('1', '$', 4);
+select jsn_set('1', '$[0]', 4);
+select jsn_set('1', '$[1]', 4);
+select jsn_set('1', '$[10]', '4', '$[11]', 5);
+
+select jsn_set('[1,2,3]', '$[2][0]', 4);
+select jsn_set('[1,2,3]', '$[2][2]', 4);
+
+select jsn_set('{"a": 3}', '$.a[0]', 4);
+select jsn_set('{"a": 3}', '$.a[1]', 4, '$.a[2]', '5');
+
+# auto-wrap plus ellipsis with nested hits should give: {"a": [{"b": [3, 6]}, 6]}
+--error ER_INVALID_JSON_PATH_WILDCARD
+select jsn_set(cast('{"a": {"b": [3]}}' as json), '$**[1]', 6);
+
+# Examples from the specification: Include when missing functions are
+# available.
+
+# returns { "a" : {}, "b" : [ 1, 2, 3 ] }
+ SELECT JSN_SET('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+                '$.a',
+                JSN_OBJECT());
+
+# # returns { "a" : "foo", "b" : [ 1, 2, 3 ], "c" : [ true, false ] }
+# SELECT JSN_SET('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+#                '$.c',
+#                JSN_ARRAY( true, false ));
+
+# # returns { "a" : "foo", "b" : [ 1, 2, 3 ], "c" : [ true, false ] }
+# SELECT JSN_SET('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+#                '$.c',
+#                JSN_ARRAY( CAST( 'true' AS JSON ), CAST( 'false' AS JSON ) ));
+
+# # returns [ 1, null, null, 2 ]
+# SELECT JSN_SET('1', '$[3]', 2);
+
+# should return { "a": { "b": false, "c": true } }
+SELECT JSN_SET('{ "a" : "foo"}', '$.a',
+                JSN_OBJECT( 'b', false ), '$.a.c', true);
+
+# returns { "a" : {}, "b" : [ 1, 2, 3 ] }
+select jsn_set('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+               '$.a',
+               cast('{}' as json));
+
+# returns { "a" : "foo", "b" : [ 1, 2, 3 ], "c" : [ true, false ] }
+select jsn_set('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+               '$.c',
+               cast('[true, false]' as json));
+
+# returns [ 1, null, null, 2 ]
+select jsn_set('1', '$[3]', 2);
+
+# should return { "a": { "b": false, "c": true } }
+select jsn_set('{ "a" : "foo"}', '$.a',
+               cast('{"b": false}' as json), '$.a.c', true);
+
+# examples from wl7909 spec
+# returns {"a": {}, "b": [1, 2, 3]}
+SELECT JSN_SET
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.a',
+  JSN_OBJECT()
+);
+
+# returns {"a": "foo", "b": [1, 2, 3], "c": [true, false]}
+SELECT JSN_SET
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.c',
+  JSN_ARRAY( true, false )
+);
+
+# returns {"a": "foo", "b": [1, 2, 3], "c": [true, false]}
+SELECT JSN_SET
+(
+  '{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+  '$.c',
+  JSN_ARRAY( CAST( 'true' AS JSON ), CAST( 'false' AS JSON ) )
+);
+
+# returns [1, 2]
+SELECT JSN_SET
+(
+  '1',
+  '$[3]',
+  2
+);
+
+# returns {"a": {"b": false, "c": true}}
+SELECT JSN_SET
+(
+   '{ "a" : "foo"}',
+   '$.a', JSN_OBJECT( 'b', false ),
+   '$.a.c', true
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_REPLACE function.
+--echo # ----------------------------------------------------------------------
+
+# NULLs
+select jsn_replace(NULL, '$.b', cast(1 as json));
+select jsn_replace('[1,2,3]', NULL, cast(1 as json));
+select jsn_replace('[1,2,3]', '$[3]', NULL);
+
+# wrong # args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_replace(NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_replace(NULL, NULL);
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_replace(NULL, NULL, NULL, NULL);
+
+# positive test cases
+
+select jsn_replace('[1,2,3]', '$[2]', 4);
+select jsn_replace('[1,2,3]', '$[3]', 4);
+select jsn_replace('[1,2,3]', '$[10]', 4);
+
+select jsn_replace('{"c":4}', '$.c', 5);
+select jsn_replace('{"c":4}', '$.a', 5);
+
+select jsn_replace('1', '$', 4);
+select jsn_replace('1', '$[0]', 4);
+select jsn_replace('1', '$[1]', 4);
+select jsn_replace('1', '$[10]', '4', '$[11]', 5);
+
+select jsn_replace('[1,2,3]', '$[2][0]', 4);
+select jsn_replace('[1,2,3]', '$[2][2]', 4);
+
+select jsn_replace('{"a": 3}', '$.a[0]', 4);
+select jsn_replace('{"a": 3}', '$.a[1]', 4, '$.a[2]', '5');
+
+
+# Examples from the specification
+
+# returns the original document because the path doesn't exist
+SELECT JSN_REPLACE('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+                   '$.c',
+                   true);
+
+# returns '{ "a" : true, "b" : [ 1, 2, 3 ] }'
+SELECT JSN_REPLACE('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+                   '$.a[0]',
+                   true);
+
+# returns the original document because the path doesn't exist
+SELECT JSN_REPLACE('{ "a" : "foo", "b" : [ 1, 2, 3 ] }',
+                   '$.b[5]',
+                   true);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_ARRAY function.
+--echo # ----------------------------------------------------------------------
+
+# NULLs
+select jsn_array(NULL, '$.b', cast(1 as json));
+select jsn_array('[1,2,3]', NULL, cast(1 as json));
+select jsn_array('[1,2,3]', '$[3]', NULL);
+
+
+# positive test cases
+select jsn_array();
+select jsn_array(3.14);
+select jsn_array('[1,2,3]');
+select jsn_array(cast('[1,2,3]' as json));
+select jsn_array(1,2,3);
+select jsn_array(b'0', b'1', b'10');
+create table t (i int, j json, d double);
+insert into t values (3, '["a", "b"]', 3.14);
+select jsn_array(i, j, d) from t;
+drop table t;
+
+# examples from the wl7909 spec
+create table department( id int, deptName varchar(50), isExempt boolean, blobColumn blob );
+insert into department values ( 405, 'Accounting', true, '<a><b>ccc</b><d></d></a>' );
+
+# returns the empty array: []
+SELECT JSN_ARRAY();
+
+# returns ["Accounting", {"processed": true }]
+SELECT JSN_ARRAY( d.deptName, CAST( '{ "processed" : true }' AS JSON ) )
+FROM department d
+WHERE id = 405;
+
+# stores a JSON value in a JSON-typed column
+create table json_table( json_column json );
+INSERT INTO json_table( json_column )
+  SELECT JSN_ARRAY( d.deptName, d.id, d.blobColumn )
+  FROM department d
+  WHERE id = 405;
+drop table json_table;
+
+drop table department;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_OBJECT function.
+--echo # ----------------------------------------------------------------------
+
+# odd number of args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_object( 'a' );
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_object( 'a', 1, 'b' );
+
+# positive tests
+select jsn_object();
+select jsn_object( null, 1 );
+select jsn_object( 'a', null );
+select jsn_object( 'a', 1 );
+select jsn_object( 'a', 1, 'b', 'foo' );
+select jsn_object( 'a', 1, 'b', 'foo', 'c', cast( '{ "d": "wibble" }' as json ) );
+select jsn_object( 'a', true, 'b', false, 'c', cast( 'null' as json) );
+select jsn_valid( jsn_object( '"a"', 1 ) );
+
+# long key
+select jsn_object( REPEAT('a', 64 * 1024), 1 );
+
+# construct from data in a table
+create table jro
+(
+  a int,
+  b varchar( 10 ),
+  c boolean
+);
+insert into jro( a, b, c ) values
+( 0, 'zero', false ),
+( 1, 'one', true ),
+( null, null, null );
+
+select a, jsn_object( 'a', a, 'b', b, 'c', c )
+from jro
+order by a;
+
+drop table jro;
+
+create table jro2( a int, b varchar( 10 ), c json );
+insert into jro2 ( a, b, c ) values
+( 1, 'array', '[ 1, 2, 3 ]' ), ( 2, 'object', '{ "d": "foo", "e": true }' );
+
+select a, jsn_object( 'type', b, 'value', c )
+from jro2 order by a;
+
+drop table jro2;
+
+# non-string keyNames are cast to CHAR
+select jsn_object(jsn_array(), jsn_array());
+select jsn_object( cast(jsn_array() as char), jsn_array());
+
+select jsn_object( 1, jsn_array());
+select jsn_object( cast(1 as char), jsn_array());
+
+# examples from the wl7909 spec
+create table department( id int, deptName varchar(50), isExempt boolean, blobColumn blob );
+insert into department values ( 405, 'Accounting', true, '<a><b>ccc</b><d></d></a>' );
+
+# returns the empty object: {}
+SELECT JSN_OBJECT();
+
+# returns {"deptName": "Accounting", "id": 405, "isExempt": true, "date": 2014-11-0400:00:00.000000}
+SELECT JSN_OBJECT
+(
+  'deptName', d.deptName,
+  'id', d.id,
+  'isExempt', d.isExempt and true
+)
+FROM department d
+WHERE id = 405;
+
+drop table department;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_SEARCH function.
+--echo # ----------------------------------------------------------------------
+
+# wrong  number of args
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_search();
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_search( '{ "a": true }' );
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_search( '{ "a": true }', 'one' );
+
+# null args
+select jsn_search( null, 'one', 'foo' );
+select jsn_search( '{ "a": "foo" }', null, 'foo' );
+# FIXME. what should happen here?
+#select jsn_search( '{ "a": "foo" }', 'one', null );
+select jsn_search( '{ "a": "foo" }', 'one', 'foo', null, null );
+select jsn_search( '{ "a": "foo" }', 'one', 'foo', null, '$.a', null );
+
+# bad values for the oneOrAll arg
+--error ER_JSON_BAD_SEARCH_ARG
+select jsn_search( '{ "a": "foo" }', 'twof', 'foo' );
+--error ER_JSON_BAD_SEARCH_ARG
+select jsn_search( '{ "a": "foo" }', 'two', 'foo' );
+
+# bad escape arg
+--error ER_WRONG_ARGUMENTS
+select jsn_search( '{ "a": "foo" }', 'one', 'foo', 'ab' );
+
+# bad path args
+--error ER_INVALID_JSON_PATH
+select jsn_search( '{ "a": "foo" }', 'one', 'foo', null, '$a' );
+--error ER_INVALID_JSON_PATH
+select jsn_search( '{ "a": "foo" }', 'all', 'foo', null, '$.a', '$b' );
+
+# simple tests for search without path arguments
+select jsn_search( '{ "a": "foobar" }', 'one', 'foo%' );
+select jsn_search( '{ "a": "foobar", "b": "focus", "c": [ "arm", "foot", "shoulder" ] }', 'one', 'foo%' );
+select jsn_search( '{ "a": "foobar", "b": "focus", "c": [ "arm", "foot", "shoulder" ] }', 'all', 'foo%' );
+select jsn_search( '{ "a": "foobar", "b": "focus", "c": [ "arm", "foot", "shoulder" ] }', 'all', 'f__us' );
+
+create table jsn_search_table( id_col int, json_col json );
+insert into jsn_search_table values
+( 1, '{ "a": "foobar" }' ),
+( 2, '{ "a": "foobar", "b": "focus", "c": [ "arm", "foot", "shoulder" ] }' );
+
+select id_col, jsn_search( json_col, 'all', 'foo%' )
+from jsn_search_table
+order by id_col;
+
+select id_col, jsn_search( json_col, 'all', 'foot' )
+from jsn_search_table
+order by id_col;
+
+select id_col, jsn_search( json_col, 'all', 'f__us' )
+from jsn_search_table
+order by id_col;
+
+# tests with path arguments
+delete from jsn_search_table;
+insert into jsn_search_table values
+( 1, '{ "a": "foobar" }' ),
+( 2, '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }' );
+
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'all', 'foo%', null, '$.a' );
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'all', 'foo%', null, '$.a', '$.b' );
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'one', 'foo%', null, '$.a', '$.b' );
+
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'ALL', 'foo%', null, '$.a' );
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'aLl', 'foo%', null, '$.a', '$.b' );
+select jsn_search( '{ "a": [ "foolish", "folly", "foolhardy"  ], "b" : "fool" }', 'ONE', 'foo%', null, '$.a', '$.b' );
+
+select id_col, jsn_search( json_col, 'all', 'foo%', null, '$.a' )
+from jsn_search_table
+order by id_col;
+select id_col, jsn_search( json_col, 'all', 'foo%', null, '$.a', '$.b' )
+from jsn_search_table
+order by id_col;
+select id_col, jsn_search( json_col, 'one', 'foo%', null, '$.a', '$.b' )
+from jsn_search_table
+order by id_col;
+
+# wildcards in the path expression
+select jsn_search
+(
+  '[ { "a": { "b": { "c": "fool" } } }, { "b": { "c": "shoulder" } }, { "c": { "c": "food"} } ]',
+  'all',
+  'foo%',
+  null,
+  '$**.c'
+);
+
+delete from jsn_search_table;
+insert into jsn_search_table values
+( 1, '{ "a": "foobar" }' ),
+( 2, '[ { "a": { "b": { "c": "fool" } } }, { "b": { "c": "shoulder" } }, { "c": { "c": "food"} } ]' );
+
+select id_col, jsn_search( json_col, 'all', 'foo%', null, '$.a', '$**.c' )
+from jsn_search_table
+order by id_col;
+select id_col, jsn_search( json_col, 'one', 'foo%', null, '$.a', '$**.c' )
+from jsn_search_table
+order by id_col;
+
+select jsn_search
+(
+  '[ { "a": { "b": { "c": "showtime" } } }, { "b": { "c": "shoulder" } }, { "c": { "c": "shoe"} } ]',
+  'all',
+  'sho%',
+  null,
+  '$**.c'
+);
+
+select jsn_search
+(
+  '[ { "a": { "b": { "c": "showtime" } } }, { "b": { "c": "shoulder" } }, { "c": { "c": "shoe"} } ]',
+  'all',
+  'sho%e',
+  null,
+  '$**.c'
+);
+
+select jsn_search
+(
+  '[ { "a": { "b": { "c": "showtime" } } }, { "b": { "c": "shoulder" } }, { "c": { "c": "shoe"} } ]',
+  'all',
+  'sho%',
+  null,
+  '$[*].c'
+);
+
+select jsn_search
+(
+  '[ { "a": { "b": { "c": "showtime" } } }, [ { "b": { "c": "shout" } }, { "c": { "c": "shoe"} } ] ]',
+  'all',
+  'sho%',
+  null,
+  '$[1]**.c'
+);
+
+# escape character
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo%bar' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo\%bar' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|', '$[0]' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|', '$[0]', '$[1]' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|', '$[0]', '$[1]', '$[2]' );
+
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo\%bar', null );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo\%bar', null, '$[0]' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo\%bar', null, '$[1]' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|', '$[0]' );
+select jsn_search( '[ "footbar", "foo%bar" ]', 'all', 'foo|%bar', '|', '$[1]' );
+
+# search is case-sensitive
+select jsn_search( '[ "abc", "ABC" ]', 'all', 'aBc' );
+select jsn_search( '[ "abc", "ABC" ]', 'all', 'abc' );
+select jsn_search( '[ "abc", "ABC" ]', 'all', 'ABC' );
+
+# only matches strings, not numerics
+select jsn_search( '[ 10, "10", 1.0, "1.0" ]', 'all', '1%' );
+
+drop table jsn_search_table;
+
+# verify that the double-quoted strings returned by jsn_search()
+# are valid path expressions when unpacked via jsn_unquote().
+
+create table jep( key_col int primary key, doc json, path varchar( 50 ) );
+insert into jep values
+( 1, '{ "onepotato": "seven"  }', '$.onepotato' ),
+( 2, '{ "one potato": "seven"  }', '$."one potato"' ),
+( 3, '{ "one \\"potato": "seven"  }', '$."one \\"potato"' ),
+( 4, '{ "one \\npotato": "seven"  }', '$."one \\npotato"' );
+
+select key_col,
+       jsn_search( doc, 'all', 'seven' ) paths,
+       jsn_unquote( cast( jsn_search( doc, 'all', 'seven' ) as char ) ) unquoted,
+       path
+from jep order by key_col;
+
+drop table jep;
+
+# examples from the wl7909 spec
+# returns null because numeric values don't match string values
+SELECT JSN_SEARCH
+(
+  '{ "a" : 123, "b" : [ 123, 456 ] }',
+  'one',
+  '123'
+);
+
+# returns "$.b[2]"
+SELECT JSN_SEARCH
+(
+  '{ "a" : "123", "b" : [ 123, "789", "123", "456", "123" ] }',
+  'one',
+  '123',
+  null,
+  '$.b'
+);
+
+# could return either "$.a" or "$.b.key"
+SELECT JSN_SEARCH
+(
+  '{ "a" : "123", "b" : { "key" : "123" } }',
+  'one',
+  '123'
+);
+
+# returns "$.b.key"
+SELECT JSN_SEARCH
+(
+  '{ "a" : "1243", "b" : { "key" : "1234" } }',
+  'one',
+  '123%'
+);
+
+# returns "$.b.c"
+SELECT JSN_SEARCH
+(
+  '{ "a" : "1243", "b" : { "key" : "1234", "c": "directorysub%directoryabc" } }',
+  'one',
+  'dir%torysub@%dir%',
+  '@'
+);
+
+# returns null because the path doesn't exist
+SELECT JSN_SEARCH
+(
+  '{ "a" : "1243", "b" : { "key" : "1234" } }',
+  'one',
+  '123%',
+  null,
+  '$.c'
+);
+
+# returns $."one potato"
+SELECT JSN_UNQUOTE
+(
+  JSN_SEARCH
+  (
+    '{ "onepotato": "foot", "one potato": "food" , "one \\"potato": "fool" }',
+    'all',
+    'food'
+  )
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of CASE and IF expressions returning JSON
+--echo # ----------------------------------------------------------------------
+create table t(j json);
+insert into t values (null), ('[3,4,5]');
+
+select jsn_type(case (null is null) when 1 then
+                cast('null' as json) else
+                cast('[1,2,3]' as json) end);
+
+select jsn_type(case (null is not null) when 1 then
+                cast('null' as json) else
+                cast('[1,2,3]' as json) end);
+
+select jsn_type(case (j is null) when 1 then
+                cast('null' as json) else
+                cast('[1,2,3]' as json) end) from t;
+
+select jsn_type( if(null is null,
+                    cast('null' as json),
+                    cast('[1,2,3]' as json)) );
+
+select jsn_type( if(null is not null,
+                    cast('null' as json),
+                    cast('[1,2,3]' as json)));
+
+select jsn_type( if(j is null,
+                    cast('{"a": 6}' as json),
+                    cast('[1,2,3]' as json))) from t;
+
+select jsn_type( if(j is null,
+                    NULL,
+                    cast('[1,2,3]' as json))    ) from t;
+--echo # ----------------------------------------------------------------------
+--echo # Test of CASE and IF expressions with mix of JSON and other types
+--echo # Common result type is VARCHAR
+--echo # ----------------------------------------------------------------------
+
+select jsn_type(case (j is null) when 1 then
+                3.14 else
+                cast('[1,2,3]' as json) end) from t;
+
+select case (j is null) when 1 then
+       3.14 else
+       cast('[1,2,3]' as json) end from t;
+
+select case (j is null) when 1 then
+       'foobar' else
+       cast('[1,2,3]' as json) end from t;
+
+select jsn_type( if(j is null,
+                 3.14,
+                 cast('[1,2,3]' as json))) from t;
+
+select if(j is null,
+          3.14,
+          cast('[1,2,3]' as json)) from t;
+
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of IFNULL
+--echo # ----------------------------------------------------------------------
+select jsn_type(ifnull(j, cast(3 as json))) from t;
+select ifnull(j, cast(3 as json)) from t;      # jsn_type masked a bug
+select jsn_type(ifnull(NULL, cast(3 as json)));
+select jsn_type(ifnull(cast(3 as json), NULL));
+
+--echo # ----------------------------------------------------------------------
+--echo # Json values used in text contexts
+--echo # ----------------------------------------------------------------------
+delete from t;
+insert into t values (NULL), (cast('"aBc"' as json));
+select upper(j) from t;
+select cast(jsn_extract(cast(concat('[', cast('["A",2]' as json), ']') as json),
+            '$[0][1]') as char) = 2;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of aggregate function MAX, MIN.
+--echo # ----------------------------------------------------------------------
+
+select max(cast('[1,2,3]' as json));
+delete from t;
+insert into t values (cast(1 as json)), (cast(10 as json)), (cast(2 as json));
+
+select max(j) from t;
+select jsn_type(max(j)) from t;
+select min(j) from t;
+select jsn_type(max(j)) from t;
+
+# if we want another sorting, cast to suitable type
+select max(cast(j as unsigned)) from t;
+--error ER_INVALID_TYPE_FOR_JSON
+select jsn_type(max(cast(j as unsigned))) from t;
+drop table t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of aggregate function SUM, AVG: in constrast to strings, we do not
+--echo # auto-convert to numeric (double) type:
+--echo # ----------------------------------------------------------------------
+create table t(j json, c varchar(20));
+insert into t values (cast('[1,2,3]' as json), '[a,b,c]');
+insert into t values (cast(7 as json), '7'),  (cast(2 as json), '2');
+select sum(j), sum(cast(j as unsigned)), sum(c) from t;
+select avg(j), avg(cast(j as unsigned)), avg(c) from t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of aggregate function GROUP_CONCAT
+--echo # ----------------------------------------------------------------------
+select group_concat(j), group_concat(distinct j), group_concat(c) from t;
+insert into t values (NULL, NULL);
+select group_concat(j), group_concat(distinct j), group_concat(c) from t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of COALESCE
+--echo # ----------------------------------------------------------------------
+
+select coalesce(cast(1 as json), cast(2 as json));
+select coalesce(j, cast(3 as json)) from t;
+select coalesce(j, 666) from t;
+select jsn_type(coalesce(j, '[1,2,3]')) from t;
+--error ER_INVALID_JSON_TEXT_IN_PARAM
+select jsn_type(coalesce(j, 'abc')) from t;
+drop table t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Auto-convert of non-utf8 returning system function
+--echo # ----------------------------------------------------------------------
+create table t(j json, id int);
+insert into t values ('{"user": "foo"}', 8), (NULL, 8);
+update t set j=jsn_set(j, '$.user', current_user()) where id=8;
+select j from t;
+update t set j=jsn_set(j, '$.user', rtrim('foo    '))  where id=8;
+select j from t;
+update t set j=jsn_set(j, '$.user', hex('abc'))  where id=8;
+select j from t;
+update t set j=jsn_set(j, '$.user', md5('bingle'))  where id=8;
+select j from t;
+update t set j=jsn_set(j, '$.user', database())  where id=8;
+select j from t;
+update t set j=jsn_set(j, '$.user', schema()) where id=8;
+select j from t;
+#
+# The hex of some UTF-8 from supplementary plane: U+2070E
+update t set j=jsn_set(j, '$.user',
+  cast(UNHEX('F0A09C8E') as char character set 'utf8mb4')) where id=8;
+set names 'utf8mb4'; # se we can see the character
+select j from t;
+select char_length(jsn_extract(j, '$.user')) from t;
+drop table t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_QUOTE, JSN_UNQUOTE
+--echo # ----------------------------------------------------------------------
+
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_quote();
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_quote('abc', 'def');
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_quote(NULL, 'def');
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_quote('abc', NULL);
+
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_unquote();
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_unquote('"abc"', '"def"');
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_unquote(NULL, 'def');
+--error ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+select jsn_unquote('"abc"', NULL);
+
+select jsn_quote(NULL);
+select jsn_unquote(NULL);
+
+select jsn_quote('abc');
+select jsn_quote(convert('abc' using ascii));
+select jsn_quote(convert('abc' using latin1));
+select jsn_quote(convert('abc' using utf8));
+select jsn_quote(convert('abc' using utf8mb4));
+
+select jsn_unquote('abc');                      # should do nothing
+
+select jsn_unquote('"abc"');
+select jsn_unquote(convert('"abc"' using ascii));
+select jsn_unquote(convert('"abc"' using latin1));
+select jsn_unquote(convert('"abc"' using utf8));
+select jsn_unquote(convert('"abc"' using utf8mb4));
+
+select jsn_quote('"');
+select jsn_unquote('"');                        # should do nothing
+
+--error ER_INCORRECT_TYPE
+select jsn_quote(123);                          # integer not allowed
+--error ER_INCORRECT_TYPE
+select jsn_unquote(123);                        # integer not allowed
+
+select jsn_unquote('""');                       # empty string
+select char_length(jsn_unquote('""'));          # verify empty string
+select jsn_unquote('"" ');                      # unchanged: no final "
+select jsn_unquote(cast(jsn_quote('abc') as json)); # round trip
+
+# No change in this JSON string: it is an object
+select cast('{"abc": "foo"}' as json);
+select jsn_unquote(cast('{"abc": "foo"}' as json));
+
+# This is a JSON string, so it is actually unquoted
+select jsn_extract(cast('{"abc": "foo"}' as json), '$.abc');
+select jsn_unquote(jsn_extract(cast('{"abc": "foo"}' as json), '$.abc'));
+
+# MySQL and ECMA strings have different sets of printable control
+# character conventions. So make sure we get the desired test
+# characters in by inserting them one by one and checking that we insert
+# a single character,  which we can test JSN_QUOTE on:
+
+create table t (c varchar(20));
+insert into t values ('\\');
+select char_length(c) from t;
+insert into t values (X'0C');                   # formfeed \f
+select sum(char_length(c)) from t;
+insert into t values ('"');
+select sum(char_length(c)) from t;
+insert into t values ('\a');
+select sum(char_length(c)) from t;
+insert into t values ('\b');
+select sum(char_length(c)) from t;
+insert into t values ('\t');
+select sum(char_length(c)) from t;
+insert into t values ('\n');
+select sum(char_length(c)) from t;
+insert into t values ('\r');
+select sum(char_length(c)) from t;
+insert into t values (X'10');                   # needs \u escape
+select sum(char_length(c)) from t;
+
+select group_concat(c) from t;
+select char_length(group_concat(c)) from t;
+select jsn_quote(group_concat(c)) from t;
+select char_length(jsn_quote(group_concat(c))) from t;
+
+select (group_concat(c) = jsn_unquote(group_concat(c))) as should_be_equal from t;
+
+select jsn_quote(convert(X'e68891' using utf8));    # chinese "I" (wo3)
+select jsn_quote(convert(X'e68891' using utf8mb4)); # chinese "I" (wo3)
+
+select cast(jsn_quote(convert(X'e68891' using utf8)) as json);
+
+select jsn_unquote(convert(X'e68891' using utf8));  # chinese "I" (wo3)
+
+select  jsn_quote(jsn_quote(jsn_quote('abc')));     # deep quote
+select  jsn_unquote(jsn_unquote(jsn_unquote(        # long round trip of it
+          jsn_quote(jsn_quote(jsn_quote('abc'))))));
+
+# DATE/TIME will lose their quotes, too:
+select cast(cast('2015-01-15 23:24:25' as datetime) as json);
+select jsn_unquote(cast(cast('2015-01-15 23:24:25' as datetime) as json));
+
+# as well as opaque values:
+select cast(st_geomfromtext('point(1 1)') as json);
+select jsn_unquote(cast(st_geomfromtext('point(1 1)') as json));
+
+delete from t;
+alter table t add column (j json);
+insert into t values (NULL, NULL);
+
+select jsn_quote(c), jsn_quote(j) from t;
+select jsn_unquote(c), jsn_unquote(j) from t;
+
+drop table t;
+
+# Test that the null flag gets reset between each execution of the JSON
+# functions.
+CREATE TABLE T_WITH_NULLS(i INT, j JSON);
+INSERT INTO T_WITH_NULLS VALUES
+(0, NULL),
+(1, '[1]'),
+(2, NULL),
+(3, '{"a":"b"}'),
+(4, NULL),
+(5, '"abc"');
+SELECT
+JSN_VALID(j),
+JSN_TYPE(j),
+JSN_KEYS(j),
+JSN_EXTRACT(j, '$'),
+JSN_REMOVE(j, '$.a.b.c'),
+JSN_APPEND(j, '$', 2),
+JSN_SET(j, '$[0]', 2),
+JSN_INSERT(j, '$[0]', 2),
+JSN_REPLACE(j, '$[0]', 2),
+JSN_MERGE(j, j),
+JSN_SEARCH(j, 'one', 'abc'),
+JSN_CONTAINS_PATH(j, 'all', '$.a'),
+JSN_LENGTH(j),
+JSN_DEPTH(j),
+JSN_ARRAY(j, j),
+JSN_OBJECT('k', j),
+JSN_UNQUOTE(CAST(j AS CHAR)),
+JSN_QUOTE(CAST(j AS CHAR))
+FROM T_WITH_NULLS
+ORDER BY i;
+DROP TABLE T_WITH_NULLS;
+
+# examples from the wl7909 spec
+# returns the SQL string literal abc
+SELECT JSN_UNQUOTE( '"abc"' );
+
+# returns the SQL string literal "abc
+SELECT JSN_UNQUOTE( '"abc' );
+
+--error ER_INCORRECT_TYPE
+SELECT JSN_UNQUOTE( 123 );
+
+# returns the SQL string literal abc
+SELECT JSN_UNQUOTE
+( CAST( CAST( '"abc"' AS JSON ) AS CHAR ) );
+
+# returns 1
+SELECT JSN_UNQUOTE
+(
+  CAST(
+    JSN_EXTRACT( '{ "userName" : "fred" }', '$.userName' )
+    AS CHAR
+  )
+) = 'fred';
+
+# returns 0
+SELECT
+  CAST(
+    JSN_EXTRACT( '{ "userName" : "fred" }', '$.userName' )
+    AS CHAR
+  ) = 'fred';
+
+# returns "abc"
+SELECT JSN_QUOTE( 'abc' );
+
+--error ER_INCORRECT_TYPE
+SELECT JSN_QUOTE( 123 );
+
+# returns the JSON document consisting of the string scalar "123"
+SELECT CAST( JSN_QUOTE( '123' ) AS JSON );
+
+--echo # ----------------------------------------------------------------------
+--echo # Test that boolean expressions are treated as boolean atom literals
+--echo # ----------------------------------------------------------------------
+
+create table t_bool_literals( a int, b varchar(10) );
+insert into t_bool_literals values ( 1, 'food' ), ( 2, 'fool' ), ( 3, 'water' );
+
+# expressions built out of logical connectives should evaluate to boolean literals, but they don't
+select a, jsn_array( ((a < 3) and (a > 1)) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', ((a < 3) and (a > 1)) ) from t_bool_literals order by a;
+
+select a, jsn_array( not ((a < 3) and (a > 1)) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not ((a < 3) and (a > 1)) ) from t_bool_literals order by a;
+
+select a, jsn_array( ((a < 3) or (a > 1)) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', ((a < 3) or (a > 1)) ) from t_bool_literals order by a;
+
+select a, jsn_array( not ((a < 3) or (a > 1)) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not ((a < 3) or (a > 1)) ) from t_bool_literals order by a;
+
+select jsn_array( not true, not false );
+select jsn_append( '[]', '$', not true, '$', not false );
+
+select a, jsn_array( 1 and true ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', 1 and true ) from t_bool_literals order by a;
+
+select a, jsn_array( not 1 ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not 1 ) from t_bool_literals order by a;
+
+# true and false literals
+select jsn_array( true, false );
+select jsn_append( '[]', '$', true, '$', false );
+
+# comparison operators should evaluate to boolean literals
+select a, jsn_array( (a < 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a < 3) ) from t_bool_literals order by a;
+
+select a, jsn_array( (a <= 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a <= 3) ) from t_bool_literals order by a;
+
+select a, jsn_array( (a > 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a > 3) ) from t_bool_literals order by a;
+
+select a, jsn_array( (a >= 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a >= 3) ) from t_bool_literals order by a;
+
+select a, jsn_array( (a <> 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a <> 3) ) from t_bool_literals order by a;
+
+select a, jsn_array( (a != 3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', (a != 3) ) from t_bool_literals order by a;
+
+# IS NULL and IS NOT NULL
+select a, jsn_array( a is null ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a is null ) from t_bool_literals order by a;
+
+select a, jsn_array( a is not null ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a is not null ) from t_bool_literals order by a;
+
+# IS TRUE and IS NOT TRUE
+
+select a, jsn_array( a is true ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a is true ) from t_bool_literals order by a;
+
+select a, jsn_array( a is not true ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a is not true ) from t_bool_literals order by a;
+
+# NULLIF which coalesce booleans should evaluate to boolean literals
+select a, jsn_array(nullif(true, false)  ) from t_bool_literals order by a;
+select a, jsn_append
+(
+  '[]',
+  '$',  nullif(true, false)
+) from t_bool_literals order by a;
+
+# would be nice if CASE coalesced a boolean type if all branches are boolean. FIXME maybe
+#select a, jsn_array( case when (a > 1) then true else false end ) from t_bool_literals order by a;
+#select a, jsn_append
+#(
+#  '[]',
+#  '$', case when (a > 1) then true else false end
+#) from t_bool_literals order by a;
+
+# as a workaround, you can always AND problematic expressions with true
+select a, jsn_array( (case when (a > 1) then true else false end) and true ) from t_bool_literals order by a;
+select a, jsn_append
+(
+  '[]',
+  '$', (case when (a > 1) then true else false end) and true
+) from t_bool_literals order by a;
+
+# between predicates should evaluate to boolean literals
+select a, jsn_array( a between 2 and 4 ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a between 2 and 4 ) from t_bool_literals order by a;
+
+# in predicates should evaluate to boolean literals
+select a, jsn_array( a in (1,3) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', a in (1,3) ) from t_bool_literals order by a;
+
+# like predicates should evaluate to boolean literals
+select a, jsn_array( b like 'foo%' ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b like 'foo%' ) from t_bool_literals order by a;
+
+# regexp predicates should evaluate to boolean literals
+select a, jsn_array( b REGEXP '^fo+d' ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b REGEXP '^fo+d' ) from t_bool_literals order by a;
+
+select a, jsn_array( b rlike '^fo+d' ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b rlike '^fo+d' ) from t_bool_literals order by a;
+
+select a, jsn_array( b not REGEXP '^fo+d' ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b not REGEXP '^fo+d' ) from t_bool_literals order by a;
+
+select a, jsn_array( b not rlike '^fo+d' ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b not rlike '^fo+d' ) from t_bool_literals order by a;
+
+# quantified comparisons should evaluate to boolean literals
+select a, jsn_array( b = some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b = some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b = all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b = all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b = any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b = any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b > some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b > some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b > all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b > all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b > any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b > any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b < some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b < some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b < all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b < all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b < any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b < any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b <= some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b <= some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b <= all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b <= all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b <= any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b <= any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b >= some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b >= some( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b >= all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b >= all( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b >= any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', b >= any( select b from t_bool_literals ) ) from t_bool_literals order by a;
+
+# exists predicates should evaluate to boolean literals
+select a, jsn_array( exists( select b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', exists( select b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+select a, jsn_array( not exists( select b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not exists( select b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+# jsn_valid() calls should evaluate to boolean literals
+select a, jsn_array( jsn_valid( b ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', jsn_valid( b ) ) from t_bool_literals order by a;
+
+select a, jsn_array( not jsn_valid( b ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not jsn_valid( b ) ) from t_bool_literals order by a;
+
+# jsn_contains_path() calls should evaluate to boolean literals
+select jsn_array( jsn_contains_path( '{ "a" : { "b" : 100 } }', 'all', '$.a.b' ) );
+
+# gtid_subset() calls should evaluate to boolean literals
+select a, jsn_array( gtid_subset('3E11FA47-71CA-11E1-9E33-C80AA9429562:23', '3E11FA47-71CA-11E1-9E33-C80AA9429562:21-57') )
+from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', gtid_subset('3E11FA47-71CA-11E1-9E33-C80AA9429562:23', '3E11FA47-71CA-11E1-9E33-C80AA9429562:21-57') )
+from t_bool_literals order by a;
+
+select a, jsn_array( not gtid_subset('3E11FA47-71CA-11E1-9E33-C80AA9429562:23', '3E11FA47-71CA-11E1-9E33-C80AA9429562:21-57') )
+from t_bool_literals order by a;
+select a, jsn_append( '[]', '$', not gtid_subset('3E11FA47-71CA-11E1-9E33-C80AA9429562:23', '3E11FA47-71CA-11E1-9E33-C80AA9429562:21-57') )
+from t_bool_literals order by a;
+
+# comparisons to subqueries should evaluate to boolean literals
+select a, jsn_array( b = ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$',  b = ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b > ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$',  b > ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b >= ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$',  b >= ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b < ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$',  b < ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+select a, jsn_array( b <= ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+select a, jsn_append( '[]', '$',  b <= ( select distinct b from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+# make sure ordinary subselects still function correctly
+select a, jsn_array( ( select distinct a from t_bool_literals where a = 1 ) ) from t_bool_literals order by a;
+
+drop table t_bool_literals;
+
+--echo # ----------------------------------------------------------------------
+--echo # Test of JSN_CONTAINS
+--echo # ----------------------------------------------------------------------
+
+--echo # should give NULL
+select jsn_contains(NULL, NULL);
+select jsn_contains(cast('{"a": 1, "b": 2}' as json), NULL);
+select jsn_contains(NULL, cast('null' as json));
+select jsn_contains(cast('[1]' as json), cast('[1]' as json), NULL);
+
+--echo # should give 0:
+select jsn_contains(cast(3.14 as json), cast(3 as json));
+
+--echo # should give 0: not at top level
+select jsn_contains(cast('{"a": {"b": 7}}' as json), cast('{"b": 7}' as json));
+
+--echo # but path argument will fix it:
+select jsn_contains(cast('{"a": {"b": 7}}' as json), cast('{"b": 7}' as json), '$.a');
+
+--echo # but arrays "introspect"
+select jsn_contains(cast('[1,[2.0, 3.0]]' as json), cast('[2.0]' as json));
+select jsn_contains(cast('[1, 2, [3, [4, 5]], 6, 7]' as json), cast('5' as json));
+
+--echo # should give 0: just a key
+select jsn_contains(cast('{"a": 1, "b": 2}' as json), cast('"a"' as json));
+
+--echo # should give 0: one candidate element doesn't match
+select jsn_contains(cast('[1]' as json), cast('[1,2]' as json));
+
+--echo # should all give 1
+select jsn_contains(cast('null' as json), cast('null' as json));
+--echo # simple object subset
+select jsn_contains(cast('{"a": 1, "b": 2}' as json), cast( '{"a": 1}' as json));
+--echo # simple vector subset
+select jsn_contains(cast('[1, 2, 3]' as json), cast('[1, 3]' as json));
+--echo # auto-wrap, should give 1
+select jsn_contains(cast('[1, 2, 3]' as json), cast(3 as json));
+--echo # ok even with nested cast off elements
+select jsn_contains(cast('{"person": {"id": 1, "country": "norway"}}' as json),
+                    cast('{"person": {"country": "norway"}}' as json));
+--echo # vector reordering and duplicates is ok
+select jsn_contains(cast('[1,3,5]' as json), cast('[5,3,1,5]' as json));
+--echo # ok even with more elts in candidate than in doc
+select jsn_contains(cast('[{"b": 4, "a":7}]' as json), cast('[{"a":7},{"b":4}]' as json));
+select jsn_contains(cast('[{"b": 4, "a":7}, 5]' as json), cast('[5, {"a":7, "b":4}]' as json));
+--echo # ok even with mixed number types that compare equal
+select jsn_contains(cast('[{"b": 4, "a":7}, 5.0]' as json), cast('[5, {"a":7.0E0, "b":4}]' as json));
+
+# examples from the wl7909 spec
+# returns 1
+SELECT JSN_CONTAINS
+(
+   CAST('[1, 4, 6]' AS JSON),
+   CAST('[1, 6]' AS JSON)
+);
+
+# returns 1; even with nested cast off elements
+SELECT JSN_CONTAINS
+(
+   CAST('{"person": {"id": 1, "country": "norway"}}' AS JSON),
+   CAST('{"person": {"country": "norway"}}' AS JSON)
+);
+
+# returns 1; reordering and duplicates are ok
+SELECT JSN_CONTAINS
+(
+   CAST('[1,3,5]' AS JSON),
+   CAST('[5,3,1,5]' AS JSON)
+);
+
+# return 0; no type conversion is performed
+SELECT JSN_CONTAINS
+(
+   CAST('[3.14]' AS JSON),
+   CAST('[3]' AS JSON)
+);
+
+# returns 1, due to auto-wrapping
+SELECT JSN_CONTAINS
+(
+   CAST('[1, 2, 3]' AS JSON),
+   CAST(3 AS JSON)
+);
+
+--echo # ----------------------------------------------------------------------
+--echo # Verify that all of the string types behave similarly when used as ANY_JSON_ATOMS
+--echo # ----------------------------------------------------------------------
+
+create table t_char( a int, b char(20) );
+insert into t_char values ( 1, 'foo' );
+
+create table t_varchar( a int, b varchar(20) );
+insert into t_varchar values ( 1, 'foo' );
+
+Create table t_tinytext( a int, b tinytext );
+insert into t_tinytext values ( 1, 'foo' );
+
+create table t_text( a int, b text );
+insert into t_text values ( 1, 'foo' );
+
+create table t_mediumtext( a int, b mediumtext );
+insert into t_mediumtext values ( 1, 'foo' );
+
+create table t_longtext( a int, b longtext );
+insert into t_longtext values ( 1, 'foo' );
+
+# treated as a string. evaluates to ["foo"]
+select jsn_array( b ) from t_char;
+select jsn_array( b ) from t_varchar;
+select jsn_array( b ) from t_tinytext;
+select jsn_array( b ) from t_text;
+select jsn_array( b ) from t_mediumtext;
+select jsn_array( b ) from t_longtext;
+
+# casts to CHAR should still be strings
+select jsn_array( cast( b as char ) ) from t_char;
+select jsn_array( cast( b as char ) ) from t_varchar;
+select jsn_array( cast( b as char ) ) from t_tinytext;
+select jsn_array( cast( b as char ) ) from t_text;
+select jsn_array( cast( b as char ) ) from t_mediumtext;
+select jsn_array( cast( b as char ) ) from t_longtext;
+
+# string-valued XML functions should behave as strings when used as ANY_JSON_ATOMs
+select jsn_array( UpdateXML('<a><b>ccc</b><d></d></a>', '/a/d', '<e>fff</e>') );
+select jsn_array( cast( UpdateXML('<a><b>ccc</b><d></d></a>', '/a/d', '<e>fff</e>') as char ) );
+select jsn_array( ExtractValue('<r><n id="1">v1</n><n id="2">v2</n></r>','//n[@id=1]' ) );
+select jsn_array( cast( ExtractValue('<r><n id="1">v1</n><n id="2">v2</n></r>','//n[@id=1]' ) as char ) );
+
+drop table t_char;
+drop table t_varchar;
+drop table t_tinytext;
+drop table t_text;
+drop table t_mediumtext;
+drop table t_longtext;
+
+--echo # ----------------------------------------------------------------------
+--echo # Check that JSON values stemming from views and derived tables work
+--echo # ----------------------------------------------------------------------
+create table t(x int);
+insert into t values (NULL), (4);
+select jsn_array(x) from (select x from t) tt order by x;
+create view v as select * from t;
+select jsn_array(x) from v order by x;
+
+drop view v;
+drop table t;
+
+--echo # ----------------------------------------------------------------------
+--echo # Ignore collation.collation when handing off val_str to a JSON field -
+--echo # bug found by John E.
+--echo # ----------------------------------------------------------------------
+create table t3( col_json json );
+insert into t3(col_json) values ( jsn_quote( '1' ) );
+select * from t3;
+select jsn_type(col_json) from t3;
+
+drop table t3;
+
+set names default;
+
+# Local Variables:
+# mode: sql
+# sql-product: mysql
+# comment-column: 48
+# comment-start: "# "
+# fill-column: 80
+# End:
