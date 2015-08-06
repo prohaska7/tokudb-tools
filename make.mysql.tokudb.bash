@@ -53,6 +53,9 @@ if [ $? -ne 0 ] ; then exit 1; fi
 get_repo $tokudb_owner tokudb-percona-server-5.6 master
 if [ $? -ne 0 ] ; then exit 1; fi
 
+get_repo $tokudb_owner tokudb-mysql-5.7 master
+if [ $? -ne 0 ] ; then exit 1; fi
+
 # merge the repos into the staging directory
 if [ ! -d $staging ] ; then
     mkdir $staging
@@ -61,6 +64,7 @@ if [ ! -d $staging ] ; then
     cp -r tokudb-engine/mysql-test $staging
     mv ft-index $staging/storage/tokudb
     cp -r tokudb-percona-server-5.6/mysql-test $staging
+    cp -r tokudb-mysql-5.7/mysql-test $staging
 
     # set the tokudb version to the github ref in the cmake file
     pushd $staging/storage/tokudb
