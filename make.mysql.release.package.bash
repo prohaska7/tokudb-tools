@@ -1,2 +1,2 @@
 #!/bin/bash
-make.mysql.bash mysql/mysql-5.7.8 prohaska7/my578p release
+make.mysql.bash mysql/mysql-5.7.9 prohaska7/my57 release

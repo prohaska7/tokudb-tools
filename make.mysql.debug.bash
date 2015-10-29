@@ -3,9 +3,9 @@
 set -e
 git clone -b 5.7 git@github.com:mysql/mysql-server
 pushd mysql-server
-git checkout mysql-5.7.8
+git checkout mysql-5.7.9
 popd
-git clone -b my578p git@github.com:prohaska7/tokudb-engine
+git clone -b my57 git@github.com:prohaska7/tokudb-engine
 git clone -b master git@github.com:prohaska7/ft-index
 ln -s ../../tokudb-engine/storage/tokudb mysql-server/storage/tokudb
 ln -s ../../../ft-index tokudb-engine/storage/tokudb/ft-index
