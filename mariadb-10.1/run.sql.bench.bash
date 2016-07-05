@@ -43,6 +43,7 @@ function runtests() {
             # assume that the test failure due to a crash.  allow mysqld to restart.
             sleep 60
         fi
+        # check for table leaks
         ../bin/mysql --socket=$socket --user=$user --database=$database -e 'show table status'
     done
 }
@@ -78,7 +79,7 @@ while read l ; do
         fi
         tlast=$t
      else
-        if [[ $l =~ Got\ error|Died ]] ; then
+        if [[ $l =~ Got\ error|Died|Test\ skipped ]] ; then
             status=FAIL
         fi
     fi

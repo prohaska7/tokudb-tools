@@ -43,11 +43,18 @@ function runtests() {
             # assume that the test failure due to a crash.  allow mysqld to restart.
             sleep 60
         fi
+        # check for table leaks
+        ../bin/mysql --socket=$socket --user=$user --database=$database -e 'show table status'
     done
 }
 
 >$tracefile
 
+# setup database
+../bin/mysql --socket=$socket --user=$user -e"drop database $database"
+../bin/mysql --socket=$socket --user=$user -e"create database $database"
+
+# run tests
 runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose --small-test         >>$tracefile 2>&1
 runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose --small-test --fast  >>$tracefile 2>&1
 runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose                      >>$tracefile 2>&1
@@ -72,7 +79,7 @@ while read l ; do
         fi
         tlast=$t
      else
-        if [[ $l =~ Got\ error|Died ]] ; then
+        if [[ $l =~ Got\ error|Died|Test\ skipped ]] ; then
             status=FAIL
         fi
     fi
@@ -90,6 +97,10 @@ if [ "$testresult" = "" ] ; then testresult="?"; fi
 let duration=$(date -d "$tlast" +%s)-$(date -d "$tfirst" +%s)
 echo $testresult TOTAL time $duration seconds>>$summaryfile
 
+# cleanup
+if [[ $testresult =~ "PASS" ]] ; then ../bin/mysql --socket=$socket --user=$user -e"drop database $database"; fi
+
+# compute exit code
 if [[ $testresult =~ "PASS" ]] ; then exitcode=0; else exitcode=1; fi
 exit $exitcode
 
