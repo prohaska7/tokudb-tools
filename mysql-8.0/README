@@ -1,0 +1,10 @@
+How to run sql-bench from mysql-5.6 on mysql-5.7 and mysql-8.0
+
+1. cp -r mysql-5.6/sql-bench mysql-8.0
+
+2. add tokudb as a transactional engine in server-cfg
+
+3. start mysqld
+
+4. run.sql.bench.bash from the sql-bench directory
+
