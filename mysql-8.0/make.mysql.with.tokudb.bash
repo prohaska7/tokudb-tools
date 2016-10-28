@@ -9,6 +9,7 @@ ln -s ../../percona-server/storage/tokudb mysql-server/storage/tokudb
 rmdir percona-server/storage/tokudb/PerconaFT
 ln -s ../../../tokuft percona-server/storage/tokudb/PerconaFT
 
+ln -s ../../../percona-server/mysql-test/include/have_tokudb.inc mysql-server/mysql-test/include/have_tokudb.inc
 for x in $(ls -d percona-server/mysql-test/suite/tokudb*); do
     ln -s ../../../$x mysql-server/mysql-test/suite/$(basename $x)
 done
