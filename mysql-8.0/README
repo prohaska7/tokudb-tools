@@ -1,10 +1,12 @@
-How to run sql-bench from mysql-5.6 on mysql-5.7 and mysql-8.0
+mysqld:
+export LD_PRELOAD=/home/rfp/src/linux/fake.fsync/libfakefsync.so
+bin/mysqld --initialize
+bin/mysqld --loose-tokudb-check-jemalloc=0 --plugin-load-add=tokudb=ha_tokudb.so --secure-file-priv=''
 
-1. cp -r mysql-5.6/sql-bench mysql-8.0
+sql-bench:
+create database sqlbench;
+create user testit@localhost identified with mysql_native_password by 'testit';
+grant all on sqlbench.* to testit@localhost;
+grant file on *.* to testit@localhost;
 
-2. add tokudb as a transactional engine in server-cfg
-
-3. start mysqld
-
-4. run.sql.bench.bash from the sql-bench directory
-
+run.sql.bench.bash --user=testit --password=testit --database=sqlbench

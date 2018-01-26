@@ -3,7 +3,7 @@
 function usage() {
     echo "run the sql bench tests"
     echo "assumes that mysqld is already running"
-    echo "--socket=$socket --user=$user --database=$database --engine=$engine --mysqlbuild=$mysqlbuild"
+    echo "--socket=$socket --user=$user --password=$password --database=$database --engine=$engine --mysqlbuild=$mysqlbuild"
 }
 
 mysqlbuild=
@@ -11,6 +11,7 @@ mysqlserver=$(hostname)
 engine=tokudb
 socket=/tmp/mysql.sock
 user=root
+password=''
 database=sqlbench
 
 # parse the command line
@@ -44,23 +45,23 @@ function runtests() {
             sleep 60
         fi
         # check for table leaks
-        ../bin/mysql --socket=$socket --user=$user --database=$database -e 'show table status'
+        ../bin/mysql --socket=$socket --user=$user -password=$password -e "show table status from $database"
     done
 }
 
 >$tracefile
 
 # setup database
-../bin/mysql --socket=$socket --user=$user -e"drop database $database"
-../bin/mysql --socket=$socket --user=$user -e"create database $database"
+../bin/mysql --socket=$socket --user=$user --password=$password -e "drop database $database"
+../bin/mysql --socket=$socket --user=$user --password=$password -e "create database $database"
 
 # run tests
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose --small-test         >>$tracefile 2>&1
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose --small-test --fast  >>$tracefile 2>&1
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose                      >>$tracefile 2>&1
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose              --fast  >>$tracefile 2>&1
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose              --fast --fast-insert >>$tracefile 2>&1
-runtests --socket=$socket --user=$user --database=$database --create-options=engine=$engine --verbose              --fast --lock-tables >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose --small-test         >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose --small-test --fast  >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose                      >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose              --fast  >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose              --fast --fast-insert >>$tracefile 2>&1
+runtests --socket=$socket --user=$user --password=$password --database=$database --create-options=engine=$engine --verbose              --fast --lock-tables >>$tracefile 2>&1
 
 # summarize the results
 tfirst=
@@ -98,7 +99,7 @@ let duration=$(date -d "$tlast" +%s)-$(date -d "$tfirst" +%s)
 echo $testresult TOTAL time $duration seconds>>$summaryfile
 
 # cleanup
-if [[ $testresult =~ "PASS" ]] ; then ../bin/mysql --socket=$socket --user=$user -e"drop database $database"; fi
+if [[ $testresult =~ "PASS" ]] ; then ../bin/mysql --socket=$socket --user=$user --password=$password -e"drop database $database"; fi
 
 # compute exit code
 if [[ $testresult =~ "PASS" ]] ; then exitcode=0; else exitcode=1; fi
