@@ -1,12 +1,21 @@
-mysqld:
+1. debug build
+make.mysql.with.tokudb.bash
+
+2. run tokudb tests
+cd install/mysql-test
+run.mtr.tokudb.bash
+
+3. run sql bench tests with tokudb
+start mysql server:
 export LD_PRELOAD=/home/rfp/src/linux/fake.fsync/libfakefsync.so
 bin/mysqld --initialize
 bin/mysqld --loose-tokudb-check-jemalloc=0 --plugin-load-add=tokudb=ha_tokudb.so --secure-file-priv=''
 
-sql-bench:
+configure mysql server for sql bench tests:
 create database sqlbench;
 create user testit@localhost identified with mysql_native_password by 'testit';
 grant all on sqlbench.* to testit@localhost;
 grant file on *.* to testit@localhost;
 
+run sql bench tests:
 run.sql.bench.bash --user=testit --password=testit --database=sqlbench
