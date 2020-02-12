@@ -1,0 +1,17 @@
+# run mysqld
+
+bin/mysqld --initialize
+capture password
+
+bin/mysqld --loose-tokudb-check-jemalloc=0 --plugin-load-add='tokudb=ha_tokudb.so' --secure-file-priv=''
+
+bin/mysql -S /tmp/mysql.sock -uroot -p'the initialize password'
+alter user root@localhost identified by '';
+
+# run sql-bench
+
+checkout percona-server 5.6
+cp sql-bench to mysql install dir
+cd sql-bench
+run.sql.bench.bash
+
