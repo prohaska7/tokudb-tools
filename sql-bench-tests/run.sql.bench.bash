@@ -28,6 +28,9 @@ if [ -f $tracefile ] ; then exit 1; fi
 summaryfile=sql-bench-$engine-$mysqlbuild-$mysqlserver.summary
 if [ -f $summaryfile ] ; then exit 1; fi
 
+if [ ! -f bench-init.pl ] ; then ln bench-init.pl.sh bench-init.pl; fi
+if [ ! -f server-cfg ] ; then ln server-cfg.sh server-cfg; fi
+
 function mydate() {
     date +"%Y%m%d %H:%M:%S"
 }
