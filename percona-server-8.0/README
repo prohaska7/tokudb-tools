@@ -1,0 +1,43 @@
+# build mysql debug
+
+make.mysql.bash
+
+# build mysql with ASAN
+
+CC=clang CXX=clang++ \
+make.mysql.bash --with-asan
+
+# run mtr tests
+
+cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/libfakefsync.so \
+bash -x run.mtr.tokudb.bash
+
+# run mtr tests with valgrind
+
+cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/libfakedl.so \
+bash -x run.mtr.tokudb.valgrind.bash
+
+# run mtr tests with sanitize
+
+cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/fakefsync.so:$HOME/usr/lib/libfakedl.so \
+bash -x run.mtr.tokudb.bash --mtr-option=--sanitize
+
+# run mysqld
+
+bin/mysqld --initialize
+capture password
+
+bin/mysqld --loose-tokudb-check-jemalloc=0 --plugin-load-add='tokudb=ha_tokudb.so;tokudb_backup=tokudb_backup.so' --secure-file-priv=''
+
+bin/mysql -S /tmp/mysql.sock -uroot -p'the initialize password'
+alter user root@localhost identified by '';
+
+# run sql-bench
+
+checkout percona-server 5.6
+cp sql-bench to install dir
+cd sql-bench
+bash -x run.sql.bench.bash
