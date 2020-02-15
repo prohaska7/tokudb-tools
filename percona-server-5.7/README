@@ -1,16 +1,28 @@
-# build mysql
+# build mysql debug
 
 make.mysql.bash
+
+# build mysql with ASAN
+
+CC=clang CXX=clang++ make.mysql.bash --with-asan
 
 # run mtr tests
 
 cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/libfakefsync.so
 bash -x run.mtr.tokudb.bash
 
 # run mtr tests with valgrind
 
 cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/libfakedl.so
 bash -x run.mtr.tokudb.valgrind.bash
+
+# run mtr tests with sanitize
+
+cd mysql-test
+LD_PRELOAD=$HOME/usr/lib/libfakedl.so
+bash -x run.mtr.tokudb.bash --mtr-option=--sanitize
 
 # run mysqld
 

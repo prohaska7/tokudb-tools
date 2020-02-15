@@ -4,6 +4,8 @@
 set -e
 build_type=Debug
 build_name=$(echo $build_type | tr [:upper:] [:lower:])
+build_repo=prohaska7/percona-server
+build_repo_shorthand=ps
 build_branch=5.7
 cmake_options=
 
@@ -21,19 +23,19 @@ for arg in $*; do
 done
 
 # get the code
-if [ ! -d ps-$build_branch ] ; then
-    git clone -b $build_branch git@github.com:prohaska7/percona-server ps-$build_branch
-    pushd ps-$build_branch
+if [ ! -d $build_repo_shorthand-$build_branch ] ; then
+    git clone -b $build_branch git@github.com:$build_repo $build_repo_shorthand-$build_branch
+    pushd $build_repo_shorthand-$build_branch
     git submodule init
     git submodule update
     popd
 fi
 
 # build the code
-if [ ! -d ps-$build_branch-$build_name-build ] ; then
-    mkdir ps-$build_branch-$build_name-build
-    pushd ps-$build_branch-$build_name-build
-    cmake -DCMAKE_BUILD_TYPE=$build_type -DCMAKE_INSTALL_PREFIX=../ps-$build_branch-$build_name-install -DDOWNLOAD_BOOST=1 -DWITH_BOOST=$HOME/boost -DENABLE_DOWNLOADS=1 $cmake_options ../ps-$build_branch >cmake.out 2>&1
+if [ ! -d $build_repo_shorthand-$build_branch-$build_name-build ] ; then
+    mkdir $build_repo_shorthand-$build_branch-$build_name-build
+    pushd $build_repo_shorthand-$build_branch-$build_name-build
+    cmake -DCMAKE_BUILD_TYPE=$build_type -DCMAKE_INSTALL_PREFIX=../$build_repo_shorthand-$build_branch-$build_name-install -DDOWNLOAD_BOOST=1 -DWITH_BOOST=$HOME/boost -DENABLE_DOWNLOADS=1 $cmake_options ../$build_repo_shorthand-$build_branch >cmake.out 2>&1
     make -j8 install >make.out 2>&1
     echo "make done=$?"
 fi
