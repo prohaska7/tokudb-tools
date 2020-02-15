@@ -45,7 +45,7 @@ function runtests() {
             sleep 60
         fi
         # check for table leaks
-        ../bin/mysql --socket=$socket --user=$user -password=$password -e "show table status from $database"
+        ../bin/mysql --socket=$socket --user=$user --password=$password -e "show table status from $database"
     done
 }
 
