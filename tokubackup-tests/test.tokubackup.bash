@@ -41,7 +41,7 @@ done
 
 if [ ! -d tokubackup-asan21 ] ; then
     mkdir tokubackup-asan21
-    cd tokubackup-asan20
+    cd tokubackup-asan21
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     make -j8 >make.out 2>&1
     ctest --verbose >ctest.out 2>&1
