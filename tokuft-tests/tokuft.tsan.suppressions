@@ -1,0 +1,92 @@
+# suppress operations already marked unsafe
+race:toku_unsafe_fetch
+race:toku_unsafe_set
+race:toku_unsafe_inc
+race:toku_unsafe_add
+
+# ignore racy memory statistics
+race:memory_status
+
+# ignore racy omt functions annotated for helgrind
+race:toku::omt_internal::subtree_templated<true>::enable_bit
+race:toku::omt_internal::subtree_templated<true>::get_bit
+race:toku::omt_internal::subtree_templated<true>::get_index
+
+# races on the partitioned counter sum annotated for helgrind.
+# alternatively, the sum could be an c++ atomic variable.
+race:sumit(local_counter*, unsigned long*)
+race:^increment_partitioned_counter$
+
+# ignore racy util status functions
+race:toku_kibbutz_get_status
+
+# ignore deadlocks in concurrent tree due to tree rebalancing.  deadlocks can not
+# happen in concurrent tree algorithms, but thread sanitizer does not know that.
+deadlock:toku::treenode::child_ptr::get_locked
+
+# concurrent lock tree get rebalanced so locks out of order
+deadlock:toku::treenode::mutex_lock
+
+# ignore racy locktree status function
+race:locktree_manager::get_status
+
+# ignore racy ft status variables
+race:cp_status
+race:ct_status
+race:fl_status
+race:ft_status
+race:hot_status
+race:le_status
+race:log_status
+race:ltm_status
+race:txn_status
+race:cachetable_miss
+race:cachetable_misstime
+race:cachetable_prefetches
+race:cachetable_evictions
+race:cleaner_executions
+race:locked_mo
+race:locked_cs
+race:toku_ft_stat64
+
+# ignore evictor test races
+race:evictor_unit_test::
+race:evictor_test_helpers::
+
+# used by cachetable race test
+race:toku_checkpointing_user_data_status
+
+# the adjust logical row count is racy.  could use an algorithm that does
+# an unsafe read followed by a compare and exchange instead.
+race:toku_ft_adjust_logical_row_count
+
+# ignore racy ydb layer status variables
+race:ydb_layer_status
+race:ydb_c_layer_status
+race:ydb_db_layer_status
+race:ydb_write_layer_status
+
+# Lock order inversions on cache file list and pair list.
+# Env open write locks cache file list then write locks pair list.
+# Begin checkpoint read locks pair list then read locks cache file list.
+# Simple fix to begin checkpoint to switch lock acquisition order and match the env open order.
+# deadlock:cachefile_list::read_lock
+
+# Races on writing_rollback variable, a part of the force recovery feature recently added.
+# If this variable gets messed up, an assert may erroneously fire.
+# race:writing_rollback
+
+# Ignore for now.
+race:cleaner::get_iterations
+race:cleaner::set_iterations
+
+# Lock order inversions caused by toku_rollback_dictionary_redirect.  The redirect code
+# should always use the same ft ref locking order.
+deadlock:toku_rollback_dictionary_redirect
+
+# ignore signal-unsafe warnings
+signal:os_free
+signal:operator delete
+
+# cleaner can lock nodes out of order
+deadlock:cleaner::run_cleaner
