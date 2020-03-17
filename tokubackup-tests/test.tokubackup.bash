@@ -19,22 +19,43 @@ function get_cxx_compiler () {
 function testit() {
     local c=$1
     local t=$2
-    CC=$(get_c_compiler $c)
-    CXX=$(get_cxx_compiler $c)
-    echo c=$c t=$t CC=$CC CXX=$CXX
+    local CC=$3
+    local CXX=$4
+    echo CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t
     CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t ../tokubackup/backup >cmake.out 2>&1
-    make -j8 >make.out 2>&1
-    ctest -j8 >ctest.out 2>&1
-    ctest -j8 -D ExperimentalMemCheck >ctest.memcheck.out 2>&1
+    echo make -j$np
+    make -j$np >make.out 2>&1
+    echo ctest -j$np
+    ctest -j$np >ctest.out 2>&1
+    echo ctest -j$np -D ExperimentalMemCheck
+    ctest -j$np -D ExperimentalMemCheck >ctest.memcheck.out 2>&1
 }
 
-for c in gcc-7 gcc-8 gcc-9 clang-9 ; do
-    for t in Debug RelWithDebInfo ; do
-        if [ ! -d tokubackup-$t-$c ] ; then
-            mkdir tokubackup-$t-$c
-            cd tokubackup-$t-$c
-            testit $c $t
-            cd ..
+np=$(egrep -c ^processor /proc/cpuinfo)
+
+for t in Debug RelWithDebInfo ; do
+    for c in gcc-5 gcc-6 gcc-7 gcc-8 gcc-9 clang-5 clang-6 clang-7 clang-8 clang-9 ; do
+        if [ -d tokubackup-$t-$c ] ; then
+            echo skipping $c $t
+        else
+            CC=$(get_c_compiler $c)
+            CXX=$(get_cxx_compiler $c)
+            set +e
+            $CC --version >/dev/null 2>&1
+            r=$?
+            if [ $r = 0 ] ; then
+                $CXX --version >/dev/null 2>&1
+                r=$?
+            fi
+            set -e
+            if [ $r != 0 ] ; then
+                echo missing $c $t
+            else
+                mkdir tokubackup-$t-$c
+                cd tokubackup-$t-$c
+                testit $c $t $CC $CXX
+                cd ..
+            fi
         fi
     done
 done
@@ -42,18 +63,29 @@ done
 if [ ! -d tokubackup-asan21 ] ; then
     mkdir tokubackup-asan21
     cd tokubackup-asan21
+    echo asan cmake
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
-    make -j8 >make.out 2>&1
+    echo asan make -j$np
+    make -j$np >make.out 2>&1
+    echo asan ctest --verbose
     ctest --verbose >ctest.out 2>&1
     cd ..
 fi
 
 if [ ! -d tokubackup-tsan21 ] ; then
+    if [ -f tokubackup.tsan.suppressions ] ; then
+        export TSAN_OPTIONS="suppressions=$PWD/tokubackup.tsan.suppressions"
+    fi
     mkdir tokubackup-tsan21
     cd tokubackup-tsan21
+    echo tsan cmake
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
-    make -j8 >make.out 2>&1
+    echo make -j$np
+    make -j$np >make.out 2>&1
+    echo ctest --verbose
     ctest --verbose >ctest.out 2>&1
     cd ..
 fi
+
+echo success
 
