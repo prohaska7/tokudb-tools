@@ -20,6 +20,12 @@ function get_cxx_compiler () {
     fi
 }
 
+function find_compilers() {
+    local where=$1
+    local compiler=$2
+    echo $(find $where -name $compiler-[0-9.]* | sort)
+}
+
 function testit() {
     local c=$1
     local t=$2
@@ -38,51 +44,58 @@ function testit() {
 
     for x in portability util locktree ft ydb ; do
         if [ ! -f ctest.$x.out ] ; then
-            echo $c $t ctest -j$np -R $x/ --timeout 3000
-            ctest -j$np -R $x/ --timeout 3000 >ctest.$x.out 2>&1
+            echo $c $t ctest -j$np -R $x/ --timeout 3000 $ctestextra
+            ctest -j$np -R $x/ --timeout 3000 $ctestextra >ctest.$x.out 2>&1
         fi
     done
 
+    if [ $memcheck = 0 ] ; then
+        return
+    fi
+
     for x in portability util locktree ft ydb ; do
         if [ ! -f ctest.memcheck.$x.out ] ; then
-            echo $c $t ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck
-            ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck >ctest.memcheck.$x.out 2>&1
+            echo $c $t ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck $ctestextra
+            ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck $ctestextra >ctest.memcheck.$x.out 2>&1
         fi
     done
 }
 
 np=$(egrep -c ^processor /proc/cpuinfo)
 buildonly=0
+memcheck=1
+ctestextra=--verbose
 
 for arg in $*; do
     if [[ $arg =~ --(.*)=(.*) ]] ; then
-        eval ${BASH_REMATCH[1]}=${BASH_REMATCH[2]}
+        eval "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
     fi
 done
 
-for c in $(for x in $(seq 9 -1 5); do echo gcc-$x; echo clang-$x;done); do
-    for t in Debug RelWithDebInfo ; do
-        CC=$(get_c_compiler $c)
-        CXX=$(get_cxx_compiler $c)
-        set +e
-        $CC --version >/dev/null 2>&1
+for c in $(find_compilers /usr/bin gcc) $(find_compilers /usr/bin clang); do
+    c=$(basename $c)
+    CC=$(get_c_compiler $c)
+    CXX=$(get_cxx_compiler $c)
+    set +e
+    $CC --version >/dev/null 2>&1
+    r=$?
+    if [ $r = 0 ] ; then
+        $CXX --version >/dev/null 2>&1
         r=$?
-        if [ $r = 0 ] ; then
-            $CXX --version >/dev/null 2>&1
-            r=$?
-        fi
-        set -e
-        if [ $r != 0 ] ; then
-            echo missing $c $t
-        else
+    fi
+    set -e
+    if [ $r != 0 ] ; then
+        echo missing $c $t
+    else
+        for t in Debug RelWithDebInfo ; do
             if [ ! -d tokuft-$t-$c ] ; then
                 mkdir tokuft-$t-$c
             fi
             cd tokuft-$t-$c
             CC=$CC CXX=$CXX testit $c $t
             cd ..
-        fi
-    done
+        done
+    fi
 done
 
 echo success

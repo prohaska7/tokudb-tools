@@ -27,11 +27,9 @@ function testit_sanitize() {
 }
 
 ASAN_OPTIONS="detect_odr_violation=0" \
-    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address \
-        testit_sanitize asan
+    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address testit_sanitize asan
 
 TSAN_OPTIONS="suppressions=$PWD/tokuft.tsan.suppressions second_deadlock_stack=1" \
-    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread \
-        testit_sanitize tsan clang clang++ -fsanitize=thread
+    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread testit_sanitize tsan
 
 echo success
