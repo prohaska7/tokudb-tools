@@ -63,7 +63,7 @@ done
 if [ ! -d tokubackup-asan21 ] ; then
     mkdir tokubackup-asan21
     cd tokubackup-asan21
-    echo asan cmake
+    echo asan CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo asan make -j$np
     make -j$np >make.out 2>&1
@@ -78,7 +78,7 @@ if [ ! -d tokubackup-tsan21 ] ; then
     fi
     mkdir tokubackup-tsan21
     cd tokubackup-tsan21
-    echo tsan cmake
+    echo tsan cmake     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo make -j$np
     make -j$np >make.out 2>&1
@@ -90,7 +90,7 @@ fi
 if [ ! -d tokubackup-coverage ] ; then
     mkdir tokubackup-coverage
     cd tokubackup-coverage
-    echo coverage cmake
+    echo coverage cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_GCOV=ON
     cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_GCOV=ON ../tokubackup/backup >cmake.out 2>&1
     echo coverage make -j$np
     make -j$np >make.out 2>&1
