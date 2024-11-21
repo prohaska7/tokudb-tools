@@ -34,7 +34,7 @@ function testit() {
 np=$(egrep -c ^processor /proc/cpuinfo)
 
 for t in Debug RelWithDebInfo ; do
-    for c in gcc-5 gcc-6 gcc-7 gcc-8 gcc-9 clang-5 clang-6 clang-7 clang-8 clang-9 ; do
+    for c in gcc-14 clang-18 ; do
         if [ -d tokubackup-$t-$c ] ; then
             echo skipping $c $t
         else
