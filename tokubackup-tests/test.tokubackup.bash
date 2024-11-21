@@ -87,5 +87,18 @@ if [ ! -d tokubackup-tsan21 ] ; then
     cd ..
 fi
 
+if [ ! -d tokubackup-coverage ] ; then
+    mkdir tokubackup-coverage
+    cd tokubackup-coverage
+    echo coverage cmake
+    cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_GCOV=ON ../tokubackup/backup >cmake.out 2>&1
+    echo coverage make -j$np
+    make -j$np >make.out 2>&1
+    echo coverage ctest --verbose
+    ctest --verbose >ctest.out 2>&1
+    gcov CMakeFiles/HotBackup*.dir/*.cc.o >gcov.out
+    cd ..
+fi
+
 echo success
 
