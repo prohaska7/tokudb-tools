@@ -21,55 +21,75 @@ function testit() {
     local t=$2
     local CC=$3
     local CXX=$4
-    echo CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t
-    CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t ../tokubackup/backup >cmake.out 2>&1
-    echo make -j$np
-    make -j$np >make.out 2>&1
-    echo ctest -j$np
-    ctest -j$np >ctest.out 2>&1
-    echo ctest -j$np -D ExperimentalMemCheck
-    ctest -j$np -D ExperimentalMemCheck >ctest.memcheck.out 2>&1
+    if [ ! -f cmake.out ] ; then
+        echo CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t -DUSE_VALGRIND=ON
+        CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t -DUSE_VALGRIND=ON ../tokubackup/backup >cmake.out 2>&1
+    fi
+    if [ ! -f make.out ] ; then
+        echo make -j$np
+        make -j$np >make.out 2>&1
+    fi
+    if [ ! -f ctest.out ] ; then
+        echo ctest -j$np -E 'helgrind|drd'
+        ctest -j$np -E 'helgrind|drd' >ctest.out 2>&1
+    fi
+    if [ $runmemcheck -ne 0 -a ! -f ctest.memcheck.out ] ; then
+        echo ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd'
+        ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd' >ctest.memcheck.out 2>&1
+    fi
+    if [ $runhelgrind -ne 0 -a ! -f ctest.helgrind.out ] ; then
+        echo ctest -j$np -R 'helgrind|drd' --timeout 300 
+        ctest -j$np -R 'helgrind|drd' --timeout 300 >ctest.helgrind.out 2>&1
+    fi
 }
 
 np=$(egrep -c ^processor /proc/cpuinfo)
 
+runmemcheck=0
+runhelgrind=0
+
+for arg in $*; do
+    if [[ $arg =~ (.*)=(.*) ]] ; then
+        eval "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+    fi
+done
+
 for t in Debug RelWithDebInfo ; do
     for c in gcc-14 clang-18 ; do
-        if [ -d tokubackup-$t-$c ] ; then
-            echo skipping $c $t
-        else
-            CC=$(get_c_compiler $c)
-            CXX=$(get_cxx_compiler $c)
-            set +e
-            $CC --version >/dev/null 2>&1
+        echo checking $c $t
+        CC=$(get_c_compiler $c)
+        CXX=$(get_cxx_compiler $c)
+        set +e
+        $CC --version >/dev/null 2>&1
+        r=$?
+        if [ $r = 0 ] ; then
+            $CXX --version >/dev/null 2>&1
             r=$?
-            if [ $r = 0 ] ; then
-                $CXX --version >/dev/null 2>&1
-                r=$?
+        fi
+        set -e
+        if [ $r != 0 ] ; then
+            echo missing $c $t
+        else
+            if [ ! -d tokubackup-$t-$c ] ; then
+               mkdir tokubackup-$t-$c
             fi
-            set -e
-            if [ $r != 0 ] ; then
-                echo missing $c $t
-            else
-                mkdir tokubackup-$t-$c
-                cd tokubackup-$t-$c
-                testit $c $t $CC $CXX
-                cd ..
-            fi
+            pushd tokubackup-$t-$c
+            testit $c $t $CC $CXX
+            popd
         fi
     done
 done
 
 if [ ! -d tokubackup-asan21 ] ; then
     mkdir tokubackup-asan21
-    cd tokubackup-asan21
+    pushd tokubackup-asan21
     echo asan CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo asan make -j$np
     make -j$np >make.out 2>&1
     echo asan ctest --verbose
     ctest --verbose >ctest.out 2>&1
-    cd ..
+    popd
 fi
 
 if [ ! -d tokubackup-tsan21 ] ; then
@@ -77,19 +97,19 @@ if [ ! -d tokubackup-tsan21 ] ; then
         export TSAN_OPTIONS="suppressions=$PWD/tokubackup.tsan.suppressions"
     fi
     mkdir tokubackup-tsan21
-    cd tokubackup-tsan21
+    pushd tokubackup-tsan21
     echo tsan cmake     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo make -j$np
     make -j$np >make.out 2>&1
     echo ctest --verbose
     ctest --verbose >ctest.out 2>&1
-    cd ..
+    popd
 fi
 
 if [ ! -d tokubackup-coverage ] ; then
     mkdir tokubackup-coverage
-    cd tokubackup-coverage
+    pushd tokubackup-coverage
     echo coverage cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_GCOV=ON
     cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_GCOV=ON ../tokubackup/backup >cmake.out 2>&1
     echo coverage make -j$np
@@ -97,7 +117,7 @@ if [ ! -d tokubackup-coverage ] ; then
     echo coverage ctest --verbose
     ctest --verbose >ctest.out 2>&1
     gcov CMakeFiles/HotBackup*.dir/*.cc.o >gcov.out
-    cd ..
+    popd
 fi
 
 echo success
