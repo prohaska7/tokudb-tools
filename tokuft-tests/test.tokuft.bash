@@ -30,72 +30,80 @@ function testit() {
     local c=$1
     local t=$2
     if [ ! -f cmake.out ] ; then
-        echo CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t ../tokuft
-        CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t ../tokuft >cmake.out 2>&1
+        echo CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t -DBUILD_TESTING=ON -DUSE_VALGRIND=ON -DVALGRIND_FAIR_SCHED=ON ../tokuft
+        CC=$CC CXX=$CXX cmake -DCMAKE_BUILD_TYPE=$t -DBUILD_TESTING=ON -DUSE_VALGRIND=ON -DVALGRIND_FAIR_SCHED=ON ../tokuft >cmake.out 2>&1
     fi
     if [ ! -f make.out ] ; then
         echo $c $t make -j$np
         make -j$np >make.out 2>&1
     fi
 
-    if [ $buildonly != 0 ] ; then
-        return
+    if [ $runfastcheck != 0 ] ; then 
+        for x in portability util locktree ft ydb ; do
+            outfile=ctest.$x.out
+            if [ ! -f $outfile ] ; then
+                echo $c $t ctest -R $x -E 'valgrind|memcheck|helgrind|drd' -j$np --timeout 3000 --output-on-failure
+                ctest -R $x -E 'valgrind|memcheck|helgrind|drd' -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
+            fi
+        done
     fi
 
-    for x in portability util locktree ft ydb ; do
-        if [ ! -f ctest.$x.out ] ; then
-            echo $c $t ctest -j$np -R $x/ --timeout 3000 $ctestextra
-            ctest -j$np -R $x/ --timeout 3000 $ctestextra >ctest.$x.out 2>&1
-        fi
-    done
-
-    if [ $memcheck = 0 ] ; then
-        return
+    if [ $runmemcheck != 0 ] ; then
+        for x in portability util locktree ft ydb ; do
+            outfile=ctest.$x.memcheck.out
+            if [ ! -f $outfile ] ; then
+                echo $c $t ctest -R $x -j$np --timeout 3000 --output-on-failure
+                ctest -R $x -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
+            fi
+        done
     fi
 
-    for x in portability util locktree ft ydb ; do
-        if [ ! -f ctest.memcheck.$x.out ] ; then
-            echo $c $t ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck $ctestextra
-            ctest -j$np -R $x/ --timeout 30000 -D ExperimentalMemCheck $ctestextra >ctest.memcheck.$x.out 2>&1
-        fi
-    done
+    if [ $runexpmemcheck != 0 ] ; then
+        for x in portability util locktree ft ydb ; do
+            outfile=ctest.$x.expmemcheck.out
+            if [ ! -f $outfile ] ; then
+                echo $c $t ctest -j$np -R $x/ -E try- --timeout 30000 -D ExperimentalMemCheck --output-on-failure
+                ctest -j$np -R $x -E try- --timeout 30000 -D ExperimentalMemCheck --output-on-failure >$outfile 2>&1
+            fi
+        done
+    fi
 }
 
 np=$(egrep -c ^processor /proc/cpuinfo)
-buildonly=0
-memcheck=1
-ctestextra=--verbose
+runfastcheck=0
+runmemcheck=0
+runexpmemcheck=0
 
 for arg in $*; do
-    if [[ $arg =~ --(.*)=(.*) ]] ; then
+    if [[ $arg =~ (.*)=(.*) ]] ; then
         eval "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
     fi
 done
 
-for c in $(find_compilers /usr/bin gcc) $(find_compilers /usr/bin clang); do
-    c=$(basename $c)
-    CC=$(get_c_compiler $c)
-    CXX=$(get_cxx_compiler $c)
-    set +e
-    $CC --version >/dev/null 2>&1
-    r=$?
-    if [ $r = 0 ] ; then
-        $CXX --version >/dev/null 2>&1
+for t in Debug RelWithDebInfo ; do
+    for c in gcc-14 clang-18 ; do
+        c=$(basename $c)
+        CC=$(get_c_compiler $c)
+        CXX=$(get_cxx_compiler $c)
+        set +e
+        $CC --version >/dev/null 2>&1
         r=$?
-    fi
-    set -e
-    if [ $r != 0 ] ; then
-        echo missing $c $t
-    else
-        for t in Debug RelWithDebInfo ; do
+        if [ $r = 0 ] ; then
+            $CXX --version >/dev/null 2>&1
+            r=$?
+        fi
+        set -e
+        if [ $r != 0 ] ; then
+            echo missing $c $t
+        else
             if [ ! -d tokuft-$t-$c ] ; then
                 mkdir tokuft-$t-$c
             fi
-            cd tokuft-$t-$c
+            pushd tokuft-$t-$c
             CC=$CC CXX=$CXX testit $c $t
-            cd ..
-        done
-    fi
+            popd
+        fi
+    done
 done
 
 echo success

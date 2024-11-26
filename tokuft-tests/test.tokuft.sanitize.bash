@@ -19,8 +19,8 @@ function testit_sanitize() {
     fi
     for x in portability util locktree ft ydb ; do
         if [ ! -f ctest.$x.out ] ; then
-            echo $t ctest -j$np --verbose -R $x/ -E 'valgrind|drd|helgrind|try-' --timeout $timeout
-            ctest -j$np --verbose -R $x/ -E 'valgrind|drd|helgrind|try-' --timeout $timeout >ctest.$x.out 2>&1
+            echo $t ctest -j$np -R $x/ -E 'valgrind|memcheck|drd|helgrind|try-' --timeout $timeout --output-on-failure
+            ctest -j$np -R $x/ -E 'valgrind|memcheck|drd|helgrind|try-' --timeout $timeout --output-on-failure >ctest.$x.out 2>&1
         fi
     done
     cd ..
