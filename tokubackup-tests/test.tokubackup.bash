@@ -30,16 +30,16 @@ function testit() {
         make -j$np >make.out 2>&1
     fi
     if [ ! -f ctest.out ] ; then
-        echo ctest -j$np -E 'helgrind|drd'
-        ctest -j$np -E 'helgrind|drd' >ctest.out 2>&1
+        echo ctest -j$np -E 'helgrind|drd' --output-on-failure
+        ctest -j$np -E 'helgrind|drd' --output-on-failure >ctest.out 2>&1
     fi
     if [ $runmemcheck -ne 0 -a ! -f ctest.memcheck.out ] ; then
-        echo ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd'
-        ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd' >ctest.memcheck.out 2>&1
+        echo ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd' --output-on-failure
+        ctest -j$np -D ExperimentalMemCheck -E 'helgrind|drd' --output-on-failure >ctest.memcheck.out 2>&1
     fi
     if [ $runhelgrind -ne 0 -a ! -f ctest.helgrind.out ] ; then
-        echo ctest -j$np -R 'helgrind|drd' --timeout 300 
-        ctest -j$np -R 'helgrind|drd' --timeout 300 >ctest.helgrind.out 2>&1
+        echo ctest -j$np -R 'helgrind|drd' --timeout 300 --output-on-failure
+        ctest -j$np -R 'helgrind|drd' --timeout 300 --output-on-failure >ctest.helgrind.out 2>&1
     fi
 }
 
@@ -87,8 +87,8 @@ if [ ! -d tokubackup-asan21 ] ; then
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo asan make -j$np
     make -j$np >make.out 2>&1
-    echo asan ctest --verbose
-    ctest --verbose >ctest.out 2>&1
+    echo asan ctest -j$np --output-on-failure
+    ctest -j$np --output-on-failure >ctest.out 2>&1
     popd
 fi
 
@@ -102,8 +102,8 @@ if [ ! -d tokubackup-tsan21 ] ; then
     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo make -j$np
     make -j$np >make.out 2>&1
-    echo ctest --verbose
-    ctest --verbose >ctest.out 2>&1
+    echo ctest -j$np --output-on-failure
+    ctest -j$np --output-on-failure >ctest.out 2>&1
     popd
 fi
 
