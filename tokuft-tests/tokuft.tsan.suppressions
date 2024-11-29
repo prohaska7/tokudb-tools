@@ -4,8 +4,12 @@ race:toku_unsafe_set
 race:toku_unsafe_inc
 race:toku_unsafe_add
 
-# ignore racy memory statistics
+# ignore racy portability memory statistics
 race:memory_status
+
+# ignore signal-unsafe warnings
+signal:os_free
+signal:operator delete
 
 # ignore racy omt functions annotated for helgrind
 race:toku::omt_internal::subtree_templated<true>::enable_bit
@@ -56,37 +60,38 @@ race:evictor_test_helpers::
 # used by cachetable race test
 race:toku_checkpointing_user_data_status
 
-# the adjust logical row count is racy.  could use an algorithm that does
-# an unsafe read followed by a compare and exchange instead.
-race:toku_ft_adjust_logical_row_count
-
 # ignore racy ydb layer status variables
 race:ydb_layer_status
 race:ydb_c_layer_status
 race:ydb_db_layer_status
 race:ydb_write_layer_status
 
+# Ignore for now.
+race:cleaner::get_iterations
+race:cleaner::set_iterations
+
+# cleaner can lock nodes out of order
+deadlock:cleaner::run_cleaner
+
+# Races on writing_rollback variable, a part of the force recovery feature recently added.
+# If this variable gets messed up, an assert may erroneously fire.
+# Fixed on nov2024-update branch
+# race:writing_rollback
+
+# the adjust logical row count is racy.  could use an algorithm that does
+# an unsafe read followed by a compare and exchange instead.
+# TODO dec2024
+race:toku_ft_adjust_logical_row_count
+
 # Lock order inversions on cache file list and pair list.
 # Env open write locks cache file list then write locks pair list.
 # Begin checkpoint read locks pair list then read locks cache file list.
 # Simple fix to begin checkpoint to switch lock acquisition order and match the env open order.
 # deadlock:cachefile_list::read_lock
-
-# Races on writing_rollback variable, a part of the force recovery feature recently added.
-# If this variable gets messed up, an assert may erroneously fire.
-# race:writing_rollback
-
-# Ignore for now.
-race:cleaner::get_iterations
-race:cleaner::set_iterations
+# TODO dec2024
+deadlock:checkpointer::begin_checkpoint
 
 # Lock order inversions caused by toku_rollback_dictionary_redirect.  The redirect code
 # should always use the same ft ref locking order.
-deadlock:toku_rollback_dictionary_redirect
-
-# ignore signal-unsafe warnings
-signal:os_free
-signal:operator delete
-
-# cleaner can lock nodes out of order
-deadlock:cleaner::run_cleaner
+# TODO dec2024
+#RFP deadlock:toku_rollback_dictionary_redirect
