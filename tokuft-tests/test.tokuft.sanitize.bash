@@ -1,6 +1,6 @@
 set -e
 
-np=$(egrep -c ^processor /proc/cpuinfo)
+np=$(grep -c ^processor /proc/cpuinfo)
 timeout=3000
 
 function testit_sanitize() {
@@ -8,7 +8,7 @@ function testit_sanitize() {
     if [ ! -d tokuft-$t ] ; then
         mkdir tokuft-$t
     fi
-    cd tokuft-$t
+    pushd tokuft-$t
     if [ ! -f cmake.out ] ; then
         echo CC=$CC CXX=$CXX CXXFLAGS=$CXXFLAGS cmake -DCMAKE_BUILD_TYPE=Debug ../tokuft
         CC=$CC CXX=$CXX CXXFLAGS=$CXXFLAGS cmake -DCMAKE_BUILD_TYPE=Debug ../tokuft >cmake.out 2>&1
@@ -23,7 +23,7 @@ function testit_sanitize() {
             ctest -j$np -R $x/ -E 'valgrind|memcheck|drd|helgrind|try-' --timeout $timeout --output-on-failure >ctest.$x.out 2>&1
         fi
     done
-    cd ..
+    popd
 }
 
 ASAN_OPTIONS="detect_odr_violation=0" \

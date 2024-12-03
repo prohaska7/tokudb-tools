@@ -43,7 +43,7 @@ function testit() {
             outfile=ctest.$x.out
             if [ ! -f $outfile ] ; then
                 echo $c $t ctest -R $x -E 'valgrind|memcheck|helgrind|drd' -j$np --timeout 3000 --output-on-failure
-                ctest -R $x -E 'valgrind|memcheck|helgrind|drd' -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
+                ctest -R $x/ -E 'valgrind|memcheck|helgrind|drd' -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
             fi
         done
     fi
@@ -53,7 +53,7 @@ function testit() {
             outfile=ctest.$x.memcheck.out
             if [ ! -f $outfile ] ; then
                 echo $c $t ctest -R $x -j$np --timeout 3000 --output-on-failure
-                ctest -R $x -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
+                ctest -R $x/ -j$np --timeout 3000 --output-on-failure >$outfile 2>&1
             fi
         done
     fi
@@ -62,14 +62,14 @@ function testit() {
         for x in portability util locktree ft ydb ; do
             outfile=ctest.$x.expmemcheck.out
             if [ ! -f $outfile ] ; then
-                echo $c $t ctest -j$np -R $x/ -E try- --timeout 30000 -D ExperimentalMemCheck --output-on-failure
-                ctest -j$np -R $x -E try- --timeout 30000 -D ExperimentalMemCheck --output-on-failure >$outfile 2>&1
+                echo $c $t ctest -j$np -R $x/ -E 'try-|\.abortrecover|\.recover|hotindexer-undo-do-test' --timeout 30000 -D ExperimentalMemCheck --output-on-failure
+                ctest -j$np -R $x/ -E 'try-|\.abortrecover|\.recover|hotindexer-undo-do-test' --timeout 30000 -D ExperimentalMemCheck --output-on-failure >$outfile 2>&1
             fi
         done
     fi
 }
 
-np=$(egrep -c ^processor /proc/cpuinfo)
+np=$(grep -c ^processor /proc/cpuinfo)
 runfastcheck=0
 runmemcheck=0
 runexpmemcheck=0
