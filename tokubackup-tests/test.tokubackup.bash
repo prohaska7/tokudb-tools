@@ -43,10 +43,12 @@ function testit() {
     fi
 }
 
-np=$(egrep -c ^processor /proc/cpuinfo)
+np=$(grep -c ^processor /proc/cpuinfo)
 
 runmemcheck=0
 runhelgrind=0
+CLANG=clang-18
+CLANGPP=clang++-18
 
 for arg in $*; do
     if [[ $arg =~ (.*)=(.*) ]] ; then
@@ -83,11 +85,23 @@ done
 if [ ! -d tokubackup-asan21 ] ; then
     mkdir tokubackup-asan21
     pushd tokubackup-asan21
-    echo asan CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug
-    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
+    echo asan CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug
+    CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo asan make -j$np
     make -j$np >make.out 2>&1
     echo asan ctest -j$np --output-on-failure
+    ctest -j$np --output-on-failure >ctest.out 2>&1
+    popd
+fi
+
+if [ ! -d tokubackup-msan21 ] ; then
+    mkdir tokubackup-msan21
+    pushd tokubackup-msan21
+    echo msan CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=memory -fsanitize-memory-track-origins" cmake -DCMAKE_BUILD_TYPE=Debug
+    CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=memory -fsanitize-memory-track-origins" cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
+    echo msan make -j$np
+    make -j$np >make.out 2>&1
+    echo msan ctest -j$np --output-on-failure
     ctest -j$np --output-on-failure >ctest.out 2>&1
     popd
 fi
@@ -98,8 +112,8 @@ if [ ! -d tokubackup-tsan21 ] ; then
     fi
     mkdir tokubackup-tsan21
     pushd tokubackup-tsan21
-    echo tsan cmake     CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
-    CC=clang CXX=clang++ CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
+    echo tsan cmake CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
+    CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo make -j$np
     make -j$np >make.out 2>&1
     echo ctest -j$np --output-on-failure
