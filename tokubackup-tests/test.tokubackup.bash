@@ -47,8 +47,8 @@ np=$(grep -c ^processor /proc/cpuinfo)
 
 runmemcheck=0
 runhelgrind=0
+GCC=gcc-14
 CLANG=clang-18
-CLANGPP=clang++-18
 
 for arg in $*; do
     if [[ $arg =~ (.*)=(.*) ]] ; then
@@ -57,7 +57,7 @@ for arg in $*; do
 done
 
 for t in Debug RelWithDebInfo ; do
-    for c in gcc-14 clang-18 ; do
+    for c in $GCC $CLANG ; do
         echo checking $c $t
         CC=$(get_c_compiler $c)
         CXX=$(get_cxx_compiler $c)
@@ -82,9 +82,11 @@ for t in Debug RelWithDebInfo ; do
     done
 done
 
-if [ ! -d tokubackup-asan21 ] ; then
-    mkdir tokubackup-asan21
-    pushd tokubackup-asan21
+CLANGPP=$(get_cxx_compiler $CLANG)
+
+if [ ! -d tokubackup-asan-$CLANG ] ; then
+    mkdir tokubackup-asan-$CLANG
+    pushd tokubackup-asan-$CLANG
     echo asan CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug
     CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=address cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo asan make -j$np
@@ -94,9 +96,9 @@ if [ ! -d tokubackup-asan21 ] ; then
     popd
 fi
 
-if [ ! -d tokubackup-msan21 ] ; then
-    mkdir tokubackup-msan21
-    pushd tokubackup-msan21
+if [ ! -d tokubackup-msan-$CLANG ] ; then
+    mkdir tokubackup-msan-$CLANG
+    pushd tokubackup-msan-$CLANG
     echo msan CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=memory -fsanitize-memory-track-origins" cmake -DCMAKE_BUILD_TYPE=Debug
     CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=memory -fsanitize-memory-track-origins" cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo msan make -j$np
@@ -106,12 +108,12 @@ if [ ! -d tokubackup-msan21 ] ; then
     popd
 fi
 
-if [ ! -d tokubackup-tsan21 ] ; then
+if [ ! -d tokubackup-tsan-$CLANG ] ; then
     if [ -f tokubackup.tsan.suppressions ] ; then
         export TSAN_OPTIONS="suppressions=$PWD/tokubackup.tsan.suppressions"
     fi
-    mkdir tokubackup-tsan21
-    pushd tokubackup-tsan21
+    mkdir tokubackup-tsan-$CLANG
+    pushd tokubackup-tsan-$CLANG
     echo tsan cmake CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
     CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
     echo make -j$np
