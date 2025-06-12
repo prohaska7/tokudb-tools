@@ -73,6 +73,8 @@ np=$(grep -c ^processor /proc/cpuinfo)
 runfastcheck=0
 runmemcheck=0
 runexpmemcheck=0
+GCC=gcc-14
+CLANG=clang-18
 
 for arg in $*; do
     if [[ $arg =~ (.*)=(.*) ]] ; then
@@ -81,7 +83,7 @@ for arg in $*; do
 done
 
 for t in Debug RelWithDebInfo ; do
-    for c in gcc-14 clang-18 ; do
+    for c in $GCC $CLANG ; do
         c=$(basename $c)
         CC=$(get_c_compiler $c)
         CXX=$(get_cxx_compiler $c)
