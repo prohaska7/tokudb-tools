@@ -1,9 +1,16 @@
 # get the source code
+git clone -b jan2026 git@github.com:prohaska7/tokubackup
 
-git clone -b nov2024-update git@github.com:prohaska7/tokubackup
+# run with 8 parallel tests
+bash test.tokubackup.bash np=8
 
-# run tests with ubuntu 2024.04.1 on 4 core 8 thread 8GB memory laptop
+# run tests with valgrind memcheck
+bash test.tokubackup.bash runmemcheck=1
 
-cp tokubackup/backup/tsan.suppressions tokubackup.tsan.suppressions
-export TSAN_OPTIONS="suppressions=$PWD/tokubackup.tsan.suppressions"
-bash test.tokubackup.bash
+# run helgrind and drd tests
+bash test.tokubackup.bash runhelgrind=1
+
+Problem #1: test6477_close_injection sometimes aborts
+
+Problem #2: tests with clang-19 and the thread sanitizer fails perhaps due to
+incorrect handling of rwlock's.
