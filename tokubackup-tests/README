@@ -10,7 +10,12 @@ bash test.tokubackup.bash runmemcheck=1
 # run helgrind and drd tests
 bash test.tokubackup.bash runhelgrind=1
 
-Problem #1: test6477_close_injection sometimes aborts
+Bug #1: test6477_close_injection sometimes aborts
 
-Problem #2: tests with clang-19 and the thread sanitizer fails perhaps due to
-incorrect handling of rwlock's.
+Bug #2: tests with clang-19 and the thread sanitizer fails
+tests with clang-19 and the thread sanitizer passes
+
+Bug #3: tests with tsan and gcc-14 cause FATAL unexpected memory map
+the exclude_all_files tests does not compile
+When all tests pass when run with setarch x86_64 -R ./test
+However, check_check test craashes
