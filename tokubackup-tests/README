@@ -13,7 +13,7 @@ bash test.tokubackup.bash runhelgrind=1
 Bug #1: test6477_close_injection sometimes aborts
 
 Bug #2: tests with clang-19 and the thread sanitizer fails
-tests with clang-19 and the thread sanitizer passes
+tests with clang-18 and the thread sanitizer passes
 
 Bug #3: tests with tsan and gcc-14 cause FATAL unexpected memory map
 the exclude_all_files tests does not compile
