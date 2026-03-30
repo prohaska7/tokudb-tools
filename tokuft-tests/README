@@ -1,0 +1,82 @@
+Git branches
+
+Tests
+
+# run tests without valgrind
+bash test.tokuft.bash runfastcheck=1
+
+# run tests including some tests with valgrind's helgrind and drd
+bash test.tokuft.bash runmemcheck=1
+
+# run all tests with valgrind's memcheck
+bash test.tokuft.bash runexpmemcheck=1
+
+# run tests with the address sanitizer
+# run tests with the thread sanitizer
+bash test.tokudb.sanitize.bash
+
+Speedups
+
+# replace the fsync function with a fake version that just delays 100 microseconds.
+export LD_PRELOAD=$HOME/bin/libfakefsync100.so
+bash test.tokuft.bash
+
+Issues
+
+Issue 1.
+# Add zstd compression.
+
+Issue 2.
+# clang-19 thread sanitizer reports bogus data races.
+
+Issue 3.
+# USE C++ STL threads and containers where appropriate.
+
+Issue 4.
+# Try to reduce client stalls.
+
+Bugs
+
+Bug 1.
+# Data race on writing_rollback variable, a part of the force recovery feature recently added.
+# If this variable gets messed up, an assert may erroneously fire.
+# Fixed on nov2024-update branch
+
+Bug 2.
+# SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/portability/os_malloc.cc:283:10 in os_malloc_usable_size(void const*)
+# SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/portability/portability.cc:147:20 in toku_os_get_pagesize()
+# Sometimes detected with running the locktree tests.
+# The locktree tests need to initialize the portability module.
+
+Bug 3.
+# toku_ft_adjust_logical_row_count data race.
+# The adjust logical row count is racy.  Could use an algorithm that does
+# an unsafe read followed by a compare and exchange instead.
+# Detected with the thread sanitizer when running ft tests.
+# Suppression in the tokuft.tsan.suppressions file.
+
+Bug 4.
+# Data race ft_copy_for_checkpoint_unlocked __tsan_memcpy and inject_message
+# Detected with the thread sanitizer when running the ft tests.
+
+Bug 5. 
+# Lock order inversions on cache file list and pair list.
+# Env open write locks cache file list then write locks pair list.
+# Begin checkpoint read locks pair list then read locks cache file list.
+# Detected when running the ydb tests.
+# Simple fix to begin checkpoint to switch lock acquisition order and match the env open order.
+# Suppression in the tokuft.tsan.suppressions file.
+
+Bug 6.
+# Lock order inversions caused by toku_rollback_dictionary_redirect.  The redirect code
+# should always use the same ft ref locking order.
+# Detected when running the ydb tests.
+# Suppression in the tokuft.tsan.suppressions file.
+
+Bug 7.
+# SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/ft/ft.cc:199:47 in ft_checkpoint(cachefile*, int, void*)
+# Data race ft_checkpoint and adjust_logical_rows.
+
+Bug 8.
+# SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/ft/ft-ops.cc:1690:12 in toku_bnc_should_promote(ft*, ftnode_nonleaf_childinfo*)
+# SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/ft/node.cc:646:93 in bn_needs_ancestors_messages(ft*, ftnode*, int, pivot_bounds const&, ancestors*, __toku_msn*)
