@@ -35,6 +35,9 @@ Issue 3.
 Issue 4.
 # Try to reduce client stalls.
 
+Issue 5.
+# Test with the memory sanitizer.
+
 Bugs
 
 Bug 1.
@@ -80,3 +83,18 @@ Bug 7.
 Bug 8.
 # SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/ft/ft-ops.cc:1690:12 in toku_bnc_should_promote(ft*, ftnode_nonleaf_childinfo*)
 # SUMMARY: ThreadSanitizer: data race /home/rfp/projects-tokuft/tokuft/ft/node.cc:646:93 in bn_needs_ancestors_messages(ft*, ftnode*, int, pivot_bounds const&, ancestors*, __toku_msn*)
+
+bug 9.
+# rfp@batty:~/projects-tokuft/tokuft-RelWithDebInfo-gcc-14$ grep Failed ctest.portability.out 
+# 21/26 Test #27: portability/try-leak-reachable ...............***Failed    0.35 sec
+# 23/26 Test #28: portability/try-uninit .......................***Failed    0.36 sec
+
+bug 10.
+# rfp@batty:~/projects-tokuft/tokuft-RelWithDebInfo-clang-18$ ctest -R compress-test --output-on-failure
+# Test project /home/rfp/projects-tokuft/tokuft-RelWithDebInfo-clang-18
+#     Start 164: ft/compress-test
+# 1/1 Test #164: ft/compress-test .................Subprocess aborted***Exception:   4.03 sec
+# /home/rfp/projects-tokuft/tokuft/ft/tests/compress-test.cc:57 test_compress_buf_method: Assertion `0==memcmp(ubuf, buf, i)' failed (errno=0)
+
+bug 11.
+# Use of memory sanitizer caused assert in portability/memory.cc
