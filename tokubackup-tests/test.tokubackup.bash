@@ -47,8 +47,8 @@ np=$(grep -c ^processor /proc/cpuinfo)
 
 runmemcheck=0
 runhelgrind=0
-GCC=gcc-14
-CLANG=clang-18
+GCC=gcc-15
+CLANG=clang-21
 
 for arg in $*; do
     if [[ $arg =~ (.*)=(.*) ]] ; then
@@ -104,6 +104,30 @@ if [ ! -d tokubackup-msan-$CLANG ] ; then
     echo msan make -j$np
     make -j$np >make.out 2>&1
     echo msan ctest -j$np --output-on-failure
+    ctest -j$np --output-on-failure >ctest.out 2>&1
+    popd
+fi
+
+if [ ! -d tokubackup-leak-$CLANG ] ; then
+    mkdir tokubackup-leak-$CLANG
+    pushd tokubackup-leak-$CLANG
+    echo leak CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=leak" cmake -DCMAKE_BUILD_TYPE=Debug
+    CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=leak" cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
+    echo leak make -j$np
+    make -j$np >make.out 2>&1
+    echo leak ctest -j$np --output-on-failure
+    ctest -j$np --output-on-failure >ctest.out 2>&1
+    popd
+fi
+
+if [ ! -d tokubackup-undefined-$CLANG ] ; then
+    mkdir tokubackup-undefined-$CLANG
+    pushd tokubackup-undefined-$CLANG
+    echo undefined CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=undefined" cmake -DCMAKE_BUILD_TYPE=Debug
+    CC=$CLANG CXX=$CLANGPP CXXFLAGS="-fsanitize=undefined" cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
+    echo undefined make -j$np
+    make -j$np >make.out 2>&1
+    echo undefined ctest -j$np --output-on-failure
     ctest -j$np --output-on-failure >ctest.out 2>&1
     popd
 fi
