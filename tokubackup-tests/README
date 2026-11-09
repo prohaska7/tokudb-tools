@@ -17,10 +17,9 @@ Bug #2:
 tests with clang-18 and tsan passes
 tests with clang-19 and tsan fails
 tests with clang-21 and tsan fails
-tests with gcc-25 and tsan fails
-
-failing tests are caused by data race protected by rwlock's
-
+tests with clang-22 and tsan fails
+tests with gcc-15 and tsan fails
+failing tests are caused by data races protected by rwlock's. can't explain.
 Bug #2: open
 
 Bug #3: tests with tsan and gcc-14 cause FATAL unexpected memory map
