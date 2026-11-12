@@ -10,6 +10,9 @@ bash test.tokubackup.bash runmemcheck=1
 # run helgrind and drd tests
 bash test.tokubackup.bash runhelgrind=1
 
+# turn off address space randomization
+setarch x86_64 -R SOME_PROGRAM
+
 Bug #1: test6477_close_injection sometimes aborts
 Bug #1: open
 
@@ -19,8 +22,18 @@ tests with clang-19 and tsan fails
 tests with clang-21 and tsan fails
 tests with clang-22 and tsan fails
 tests with gcc-15 and tsan fails
-failing tests are caused by data races protected by rwlock's. can't explain.
-Bug #2: open
+failing tests are caused by data races protected by rwlock's.
+Bug #2 resolution:
+Data races appear to be false positive reports.
+The TSAN option 'ignore_noninstrumented_modules=1' causes the
+false positives to no longer reported.
+I added some simple data races to the tokubackup tests and
+shared library.  These races are reported by TSAN with the ignore
+option set.
+Perhaps the standard library that include rwlock's is not
+instrumented by TSAN are the cause of these problems.
+At least gemini thinks so.
+Bug #2: closed
 
 Bug #3: tests with tsan and gcc-14 cause FATAL unexpected memory map
 the exclude_all_files tests does not compile

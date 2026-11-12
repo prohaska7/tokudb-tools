@@ -16,11 +16,7 @@ function get_cxx_compiler () {
     fi
 }
 
-
 np=$(grep -c ^processor /proc/cpuinfo)
-
-runmemcheck=0
-runhelgrind=0
 CLANG=clang-21
 
 for arg in $*; do
@@ -80,16 +76,27 @@ if [ ! -d tokubackup-undefined-$CLANG ] ; then
 fi
 
 if [ ! -d tokubackup-tsan-$CLANG ] ; then
-    if [ -f tokubackup.tsan.suppressions ] ; then
-        export TSAN_OPTIONS="suppressions=$PWD/tokubackup.tsan.suppressions"
+    TSAN_OPTIONS=
+    if [[ $CLANG =~ (.*)-(.*) ]] ; then
+        C=${BASH_REMATCH[1]}
+        V=${BASH_REMATCH[2]}
+        if [ $C = clang -a $V -gt 18 ] ; then
+            TSAN_OPTIONS="ignore_noninstrumented_modules=1"
+        fi
     fi
+    if [ -f tokubackup.tsan.suppressions ] ; then
+        TSAN_OPTIONS="$TSAN_OPTIONS suppressions=$PWD/tokubackup.tsan.suppressions"
+    fi
+    export TSAN_OPTIONS
+    echo TSAN_OPTIONS=\"$TSAN_OPTIONS\"
     mkdir tokubackup-tsan-$CLANG
     pushd tokubackup-tsan-$CLANG
+    
     echo tsan cmake CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug
     CC=$CLANG CXX=$CLANGPP CXXFLAGS=-fsanitize=thread cmake -DCMAKE_BUILD_TYPE=Debug ../tokubackup/backup >cmake.out 2>&1
-    echo make -j$np
+    echo tsan make -j$np
     make -j$np >make.out 2>&1
-    echo ctest -j$np --output-on-failure
+    echo tsan ctest -j$np --output-on-failure
     ctest -j$np --output-on-failure >ctest.out 2>&1
     popd
 fi
